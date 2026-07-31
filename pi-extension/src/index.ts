@@ -108,6 +108,11 @@ import {
 } from "./session/local_config.js";
 import { runSetupWizard, type WizardUI } from "./session/setup_wizard.js";
 import { updateFooter, type FooterState } from "./ui/footer.js";
+import {
+  PEERS_WIDGET_KEY,
+  makeRightAlignedPeersWidget,
+  onlinePeerNames,
+} from "./ui/peers_widget.js";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chmodSync, mkdtempSync, mkdirSync, copyFileSync, existsSync, unlinkSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
@@ -237,6 +242,7 @@ let _currentThinking: ThinkingLevel | undefined = undefined;  // last-known thin
 let _meshNode: MeshNode | null = null;
 let _sessionName: string | null = null;
 let _sessionPeerCount = 0;
+let _peerNames: string[] = [];
 // Invalidates an in-flight MeshNode.connect() before it can publish globally.
 let _meshJoinGeneration = 0;
 // Set true by `session_shutdown`. Connecting is async, so shutdown can land
@@ -281,6 +287,7 @@ function _refreshSessionPeerCount(
       const peers = (reply.body as { peers?: string[] } | null)?.peers;
       if (Array.isArray(peers)) {
         _sessionPeerCount = peers.length;
+        _peerNames = onlinePeerNames(peers, _meshNode?.name() ?? null);
         _refreshFooter(ctx);
       }
     })
@@ -766,6 +773,7 @@ function _liveCtx(
 function _ctxUi(preferred?: { ui?: unknown } | null): {
   setStatus?: (k: string, v: string | undefined) => void;
   setTitle?: (t: string) => void;
+  setWidget?: (k: string, v: unknown) => void;
   notify?: (message: string, level?: string) => void;
 } | null {
   const target = _liveCtx(preferred);
@@ -774,6 +782,7 @@ function _ctxUi(preferred?: { ui?: unknown } | null): {
     return (target.ui as {
       setStatus?: (k: string, v: string | undefined) => void;
       setTitle?: (t: string) => void;
+      setWidget?: (k: string, v: unknown) => void;
       notify?: (message: string, level?: string) => void;
     } | null | undefined) ?? null;
   } catch {
@@ -792,12 +801,40 @@ function _safeNotify(message: string, level: "info" | "warning" | "error" = "inf
   }
 }
 
+function _safePiSendMessage(
+  message: Parameters<ExtensionAPI["sendMessage"]>[0],
+  options?: Parameters<ExtensionAPI["sendMessage"]>[1],
+): void {
+  const pi = _pi;
+  if (!pi || _disposed) return;
+  try {
+    if (options !== undefined) pi.sendMessage(message, options);
+    else pi.sendMessage(message);
+  } catch {
+    // Extension runtime replaced or not initialized.
+  }
+}
+
+function _updatePeersWidget(ui?: { setWidget?: (k: string, v: unknown) => void } | null): void {
+  if (!ui || typeof ui.setWidget !== "function") return;
+  try {
+    if (_state === "idle" || _peerNames.length === 0) {
+      ui.setWidget(PEERS_WIDGET_KEY, undefined);
+      return;
+    }
+    ui.setWidget(PEERS_WIDGET_KEY, makeRightAlignedPeersWidget(_peerNames));
+  } catch {
+    // Widget updates are best-effort across session replacement.
+  }
+}
+
 /** Refreshes the Pi TUI footer slots from current module state. Safe no-op when ctx lacks ui. */
-function _refreshFooter(ctx?: { ui?: { setStatus?: unknown; setTitle?: unknown } } | null): void {
+function _refreshFooter(ctx?: { ui?: { setStatus?: unknown; setTitle?: unknown; setWidget?: unknown } } | null): void {
   // Prefer live session_start ctx over capturable-stale command ctx (issue #55).
   let ui: {
     setStatus?: (k: string, v: string | undefined) => void;
     setTitle?: (t: string) => void;
+    setWidget?: (k: string, v: unknown) => void;
   } | null;
   try {
     ui = _ctxUi(ctx);
@@ -821,8 +858,9 @@ function _refreshFooter(ctx?: { ui?: { setStatus?: unknown; setTitle?: unknown }
       { ui: { setStatus: ui.setStatus.bind(ui), setTitle: ui.setTitle.bind(ui) } },
       state,
     );
+    _updatePeersWidget(ui);
   } catch {
-    // setStatus/setTitle can also throw if the runner went stale mid-call.
+    // UI methods can throw if the runner goes stale mid-call.
   }
 }
 
@@ -1063,6 +1101,22 @@ export function _getPendingSteerIdsForTest(text: string): string[] {
  *  content handed to `sendUserMessage` (plan/30 multimodal ingest). */
 export function _setPiForTest(pi: unknown): void {
   _pi = pi as typeof _pi;
+}
+
+export function _emitRelayStateForTest(force = true): void {
+  _emitRelayState(force);
+}
+
+export function _getPeerNamesForTest(): string[] {
+  return [..._peerNames];
+}
+
+export function _setPeerNamesForTest(names: string[]): void {
+  _peerNames = [...names];
+}
+
+export function _refreshFooterForTest(ctx?: { ui?: unknown } | null): void {
+  _refreshFooter(ctx as Parameters<typeof _refreshFooter>[0]);
 }
 
 /**
@@ -1346,7 +1400,7 @@ function _inspectPeerRecord(record: unknown): InspectedPeerRecord | null {
 
 function _reportRevocationByFingerprint(canonicalOwnerPubkey: string): void {
   const fingerprint = _runtimeOwnerFingerprint(canonicalOwnerPubkey);
-  _pi?.sendMessage({
+  _safePiSendMessage({
     customType: "remote-pi:mesh-revoked",
     content:
       `🔒 Revoked by Owner ${fingerprint}…\n\n` +
@@ -1606,21 +1660,17 @@ function _emitRelayState(force = false): void {
   // An uncaught throw from a WS event callback becomes a process-level
   // uncaughtException and exits pi. Swallow it here: the next relay-state
   // change re-emits, so connectivity is eventually consistent. See issue #55.
-  try {
-    _pi?.sendMessage({
-      customType: "remote-pi:relay-state",
-      content: `Relay ${status}`,
-      details: {
-        status,
-        connected: status === "connected",
-        ...(_relayUrl ? { relayUrl: _relayUrl } : {}),
-        ...(_myRoomId ? { room: _myRoomId } : {}),
-      },
-      display: false,
-    });
-  } catch {
-    // _pi stale (session replaced) or extension runtime not yet bound.
-  }
+  _safePiSendMessage({
+    customType: "remote-pi:relay-state",
+    content: `Relay ${status}`,
+    details: {
+      status,
+      connected: status === "connected",
+      ...(_relayUrl ? { relayUrl: _relayUrl } : {}),
+      ...(_myRoomId ? { room: _myRoomId } : {}),
+    },
+    display: false,
+  });
 }
 
 /** Minimal ctx for relay start/stop driven by a control message (no command
@@ -1733,7 +1783,7 @@ async function _renameAgent(newName: string): Promise<void> {
 
   if (wasStarted && !_disposed) await _cmdStart(ctx);  // relay back up → roomIdFor(cwd, assigned)
 
-  _pi?.sendMessage({
+  _safePiSendMessage({
     customType: "remote-pi:name-assigned",
     content: assigned === newName
       ? `Mesh name: ${assigned}`
@@ -2017,7 +2067,7 @@ async function _handlePairRequest(
   // Notify local RPC clients (e.g. Cockpit) that pairing completed, so they can
   // close the QR screen and show the new device. Pure data event (display:false)
   // — still emitted to the RPC stdout via the session stream.
-  _pi?.sendMessage({
+  _safePiSendMessage({
     customType: "remote-pi:paired",
     content: `Paired with ${inner.device_name}`,
     details: { name: inner.device_name, peerId: appPeerId, pairedAt },
@@ -2340,6 +2390,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // bound to the current session.
   pi.on("session_start", (_event, ctx) => {
     _lastEventCtx = ctx;
+    if (!_pi) _pi = pi;
     // session_shutdown disposes per-session pi-ask subscriptions. A host that
     // reuses this module instance does NOT re-run the factory, so rebind the
     // bridge here; fresh-module hosts already created theirs in the factory.
@@ -2454,6 +2505,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // (issue #55). session_start re-binds `_lastEventCtx` for the new session.
     _lastCtx = null;
     _lastEventCtx = null;
+    _pi = null;
     // No bye reason: the process keeps running and the fresh instance re-joins
     // the SAME relay room, so an explicit offline→online flap would be wrong.
     // Revoke producer/Relay/bridge authority while the global node is still
@@ -2468,6 +2520,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     _meshNode = null;
     _sessionName = null;
     _sessionPeerCount = 0;
+    _peerNames = [];
     let meshClose: Promise<void> | null = null;
     try { meshClose = meshNode?.close() ?? null; } catch { /* best-effort */ }
 
@@ -3168,9 +3221,9 @@ async function _cmdPair(ctx: Pick<ExtensionContext, "ui" | "cwd">, args = ""): P
   // small mode is pure Unicode (█ ▀ ▄ space, no ANSI escapes — see
   // `lib/main.js:48-53`), so embedding the ASCII inside a sendMessage
   // content string renders correctly without raw escape bytes.
-  if (_pi) {
+  {
     const qrAscii = renderQRAscii(qrUri);
-    _pi.sendMessage({
+    _safePiSendMessage({
       customType: "remote-pi:pair-code",
       content:
         `📱 Scan to pair:\n\n${qrAscii}\n` +
@@ -3221,6 +3274,7 @@ async function _cmdStop(ctx: Pick<ExtensionContext, "ui">): Promise<void> {
   _meshNode = null;
   _sessionName = null;
   _sessionPeerCount = 0;
+  _peerNames = [];
   let meshClose: Promise<void> | null = null;
   try { meshClose = meshNode?.close() ?? null; } catch { /* best-effort */ }
   try { await meshClose; } catch { /* best-effort */ }
@@ -4122,13 +4176,14 @@ function _scheduleMeshMessageDrain(): void {
   queueMicrotask(() => {
     _meshDrainScheduled = false;
     const pi = _pi;
-    if (_agentRunActive || !pi || _pendingMeshMessages.length === 0) return;
+    if (_agentRunActive || !pi || _disposed || _pendingMeshMessages.length === 0) return;
 
     const batch = _pendingMeshMessages.splice(0);
     let delivered = 0;
     _agentRunActive = true;
     try {
       batch.forEach((env, index) => {
+        if (_disposed || _pi !== pi) throw new Error("extension replaced mid mesh drain");
         const isLast = index === batch.length - 1;
         pi.sendMessage(
           _meshMessageForAgent(env),
@@ -4308,7 +4363,7 @@ async function _cmdJoin(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void
     // accident and causes cross-folder name ping-pong across restarts. The clean
     // name (wizard / explicit `agent_name`) already lives in config or re-derives
     // from `basename(cwd)`; the event above carries the live `#N` for the UI.
-    _pi?.sendMessage({
+    _safePiSendMessage({
       customType: "remote-pi:name-assigned",
       content: assigned === requestedName
         ? `Mesh name: ${assigned}`
