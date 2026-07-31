@@ -219,6 +219,10 @@ const {
   _getMessageBufferForTest,
   _setCurrentModelForTest,
   _setPiForTest,
+  _emitRelayStateForTest,
+  _getPeerNamesForTest,
+  _setPeerNamesForTest,
+  _refreshFooterForTest,
   _getCurrentTurnIdForTest,
   _getPendingSteerIdsForTest,
   _connectForTest,
@@ -2953,6 +2957,56 @@ describe("routeClientMessage cancel handling", () => {
     // Footer refresh preferred the fresh session_start ui, not the throwing one.
     expect(freshSetStatus).toHaveBeenCalled();
     expect(freshNotify).toHaveBeenCalled();
+  });
+
+  test("_emitRelayState never throws when pi.sendMessage is dead after reload", () => {
+    // Regression: session_shutdown /relay callbacks used a live-looking `_pi`
+    // whose sendMessage throws "Extension runtime not initialized" after /reload.
+    const sendMessage = vi.fn(() => {
+      throw new Error("Extension runtime not initialized");
+    });
+    _setPiForTest({ sendMessage });
+    _setDisposedForTest(false);
+    expect(() => _emitRelayStateForTest(true)).not.toThrow();
+    expect(sendMessage).toHaveBeenCalled();
+  });
+
+  test("session_shutdown drops _pi so late _emitRelayState is a no-op", async () => {
+    const sendMessage = vi.fn(() => {
+      throw new Error("Extension runtime not initialized");
+    });
+    _setPiForTest({ sendMessage });
+
+    const onShutdown = captureEventHandler("session_shutdown");
+    await onShutdown({ type: "session_shutdown" }, {} as never);
+
+    sendMessage.mockClear();
+    expect(() => _emitRelayStateForTest(true)).not.toThrow();
+    // Binding cleared + disposed: must not touch the dead ExtensionAPI.
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    // Re-arm for subsequent tests in this shared module.
+    _setDisposedForTest(false);
+    _setPiForTest({ sendMessage: vi.fn() });
+    _resetAutoInitedForTest();
+  });
+
+  test("footer refresh paints agent-name slot and right-aligned peers widget", () => {
+    const setStatus = vi.fn();
+    const setTitle = vi.fn();
+    const setWidget = vi.fn();
+    _setPeerNamesForTest(["alpha", "beta"]);
+    _refreshFooterForTest({
+      ui: { setStatus, setTitle, setWidget },
+    });
+    // Without a mesh join, agent name may be undefined — slot still written.
+    expect(setStatus).toHaveBeenCalledWith(
+      "remote-pi:agent-name",
+      undefined,
+    );
+    // Idle → widget cleared (right-aligned chip only when mesh is up).
+    expect(setWidget).toHaveBeenCalledWith("remote-pi:peers-online", undefined);
+    expect(_getPeerNamesForTest()).toEqual(["alpha", "beta"]);
   });
 
   test("cancel is handled before the strict pi binding guard", async () => {

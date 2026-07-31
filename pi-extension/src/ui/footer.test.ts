@@ -22,6 +22,31 @@ function makeMockCtx(): FooterContext & {
 }
 
 describe("updateFooter — footer slots ('local' rendering)", () => {
+  test("agent-name slot is set first so alpha status sort keeps it leftmost", () => {
+    const ctx = makeMockCtx();
+    updateFooter(ctx, {
+      session: "local",
+      peerCount: 1,
+      relayOn: false,
+      agentName: "backend",
+    });
+    expect(ctx.statusCalls[0]).toEqual({
+      key: "remote-pi:agent-name",
+      value: "backend",
+    });
+    // Lexicographic key order: agent-name < peer-active < relay < session
+    const keys = ctx.statusCalls.map((c) => c.key).filter((k) => k.startsWith("remote-pi:"));
+    const sorted = [...keys].sort();
+    expect(sorted[0]).toBe("remote-pi:agent-name");
+  });
+
+  test("agent-name slot cleared when name missing/blank", () => {
+    const ctx = makeMockCtx();
+    updateFooter(ctx, { session: "local", peerCount: 0, agentName: "  " });
+    const nameSlot = ctx.statusCalls.find((c) => c.key === "remote-pi:agent-name");
+    expect(nameSlot?.value).toBeUndefined();
+  });
+
   test("session slot shows 'local' when joined to the mesh", () => {
     const ctx = makeMockCtx();
     const state: FooterState = {
