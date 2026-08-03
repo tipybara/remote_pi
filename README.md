@@ -10,6 +10,7 @@ The complete upstream repository documentation is preserved verbatim in [`origin
 - Adds a right-aligned live online-peer widget.
 - Keeps the local mesh usable when relay auto-start is disabled.
 - Makes relay state notifications reload-safe: callbacks never use a stale captured Pi extension context after `/reload` or session replacement.
+- Uses Pi 0.83's live `ctx.modelRegistry` instead of removed static factories, and contains every relay-message failure so an app request cannot terminate Pi with an `uncaughtException`.
 - Exposes the repository root as a Pi git package, so it can be installed directly with:
 
 ```bash

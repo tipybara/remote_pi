@@ -1,37 +1,33 @@
 /**
- * Plan/28 — ModelRegistry instance shared by the action handlers.
+ * Resolve the model registry exposed by the current Pi extension context.
  *
- * pi-extension creates its **own** `ModelRegistry` instance alongside the
- * one `AgentSession` instantiates internally. Both read the same on-disk
- * sources (`~/.pi/auth/*`, `~/.pi/models.json`), so they stay in sync —
- * we just call `refresh()` before each `list_models` request to capture
- * changes the user makes via `/login` or `/scoped-models` in the TUI.
- *
- * Why a fresh instance instead of accessing Pi's: the `ExtensionAPI`
- * surface does not expose `AgentSession`'s registry, and the public
- * factories (`ModelRegistry.create`, `AuthStorage.create`) are the
- * documented way for extensions to read the same catalog. No deep
- * imports, no internal-state coupling — see the probe note in
- * `plan/28-pi-commands.md` Wave 0.
+ * Pi 0.83 removed the old public `ModelRegistry.create(AuthStorage.create())`
+ * factories. More importantly, a separately-created registry never included
+ * providers registered dynamically by extensions. The live context registry is
+ * now the only supported source of truth.
  */
 
-import { ModelRegistry, AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
-let _registry: ModelRegistry | null = null;
-
-/**
- * Lazily instantiate the shared `ModelRegistry`. Subsequent calls return
- * the same instance — keep it cached so `refresh()` cycles are cheap and
- * the underlying `models.json` parse is amortized across requests.
- */
-export function ensureModelRegistry(): ModelRegistry {
-  if (!_registry) {
-    _registry = ModelRegistry.create(AuthStorage.create());
-  }
-  return _registry;
+export interface ModelRegistryContext {
+  modelRegistry?: ModelRegistry;
 }
 
-/** Test seam — drop the cached registry so tests can rebuild with fakes. */
+/**
+ * Return the live registry or fail with a controlled, actionable error.
+ * Callers must catch this error and reply on the wire; it must never escape a
+ * relay/WebSocket callback as an uncaughtException.
+ */
+export function ensureModelRegistry(
+  ctx: ModelRegistryContext | null | undefined,
+): ModelRegistry {
+  if (!ctx?.modelRegistry) {
+    throw new Error("model registry unavailable (no active Pi session context)");
+  }
+  return ctx.modelRegistry;
+}
+
+/** Retained as a no-op compatibility seam for older tests/importers. */
 export function _resetModelRegistryForTests(): void {
-  _registry = null;
+  // No module cache remains: the registry belongs to the live Pi context.
 }

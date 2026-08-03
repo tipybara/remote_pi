@@ -210,6 +210,18 @@ describe("handleModelSet", () => {
     });
   });
 
+  test("missing registry → controlled action_error", async () => {
+    const sender = makeSender();
+    await expect(handleModelSet(fakePi(), null, undefined, sender, {
+      type: "model_set", id: "r4-no-registry", provider: "anthropic", model_id: "claude-opus-4-7",
+    })).resolves.toBeUndefined();
+    expect(sender.sent[0]).toMatchObject({
+      type: "action_error",
+      in_reply_to: "r4-no-registry",
+      error: expect.stringContaining("model registry unavailable"),
+    });
+  });
+
   test("unknown model → action_error", async () => {
     const reg = fakeRegistry([sampleModel]);
     const sender = makeSender();
@@ -279,11 +291,11 @@ describe("handleModelSet", () => {
 // ── list_models ────────────────────────────────────────────────────────────
 
 describe("handleListModels", () => {
-  test("returns wire-shaped catalog with current echo when ctx.getModel is set", () => {
+  test("returns wire-shaped catalog with current echo when ctx.getModel is set", async () => {
     const reg = fakeRegistry([sampleModel]);
     const ctx: ActionCtx = { getModel: () => sampleModel };
     const sender = makeSender();
-    handleListModels(ctx, reg, sender, { type: "list_models", id: "r5" });
+    await handleListModels(ctx, reg, sender, { type: "list_models", id: "r5" });
     const reply = sender.sent[0];
     expect(reply.type).toBe("models_list");
     if (reply.type !== "models_list") throw new Error("type guard");
@@ -301,17 +313,17 @@ describe("handleListModels", () => {
     expect(reply.current).toEqual(reply.models[0]);
   });
 
-  test("omits `current` when ctx.getModel is undefined", () => {
+  test("omits `current` when ctx has no current model", async () => {
     const reg = fakeRegistry([sampleModel]);
     const sender = makeSender();
-    handleListModels(null, reg, sender, { type: "list_models", id: "r5" });
+    await handleListModels(null, reg, sender, { type: "list_models", id: "r5" });
     const reply = sender.sent[0];
     expect(reply.type).toBe("models_list");
     if (reply.type !== "models_list") throw new Error("type guard");
     expect(reply.current).toBeUndefined();
   });
 
-  test("prefers ctx.modelRegistry over the fallback registry", () => {
+  test("prefers ctx.modelRegistry over the fallback registry", async () => {
     const fallback = fakeRegistry([sampleModel]);
     const liveModel: SdkModelLike = {
       id: "gpt-oss-20b",
@@ -323,7 +335,7 @@ describe("handleListModels", () => {
     const live = fakeRegistry([liveModel]);
     const ctx: ActionCtx = { modelRegistry: live };
     const sender = makeSender();
-    handleListModels(ctx, fallback, sender, { type: "list_models", id: "r5" });
+    await handleListModels(ctx, fallback, sender, { type: "list_models", id: "r5" });
     const reply = sender.sent[0];
     expect(reply.type).toBe("models_list");
     if (reply.type !== "models_list") throw new Error("type guard");
@@ -339,19 +351,42 @@ describe("handleListModels", () => {
     ]);
   });
 
-  test("registry refresh failure surfaces as error envelope", () => {
+  test("registry refresh failure surfaces as error envelope", async () => {
     const reg: ActionModelRegistry = {
       refresh: () => { throw new Error("models.json malformed"); },
       getAvailable: () => [],
       find: () => undefined,
     };
     const sender = makeSender();
-    handleListModels(null, reg, sender, { type: "list_models", id: "r5" });
+    await handleListModels(null, reg, sender, { type: "list_models", id: "r5" });
     expect(sender.sent[0]).toMatchObject({
       type: "error",
       in_reply_to: "r5",
       code: "internal_error",
       message: expect.stringContaining("models.json malformed"),
+    });
+  });
+
+  test("uses Pi 0.83 ctx.model as the current-model echo", async () => {
+    const reg = fakeRegistry([sampleModel]);
+    const sender = makeSender();
+    await handleListModels({ model: sampleModel }, reg, sender, { type: "list_models", id: "r5" });
+    expect(sender.sent[0]).toMatchObject({
+      type: "models_list",
+      current: { id: sampleModel.id, provider: sampleModel.provider },
+    });
+  });
+
+  test("missing live and fallback registries returns a controlled error", async () => {
+    const sender = makeSender();
+    await expect(handleListModels(null, undefined, sender, {
+      type: "list_models", id: "r5-no-registry",
+    })).resolves.toBeUndefined();
+    expect(sender.sent[0]).toMatchObject({
+      type: "error",
+      in_reply_to: "r5-no-registry",
+      code: "internal_error",
+      message: expect.stringContaining("model registry unavailable"),
     });
   });
 });

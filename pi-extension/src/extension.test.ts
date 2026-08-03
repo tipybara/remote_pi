@@ -2857,6 +2857,29 @@ describe("routeClientMessage cancel handling", () => {
     await stop("", { ui: { notify: vi.fn() }, cwd: "/tmp/remote-pi-cancel-reset" } as ReturnType<typeof makeMockCtx>);
   });
 
+  test("list_models without a registry is contained and never throws from relay routing", async () => {
+    _setPiForTest(makeMockPi().pi);
+    const onSessionStart = captureEventHandler("session_start");
+    onSessionStart({ type: "session_start" }, {
+      abort: vi.fn(), compact: vi.fn(), ui: { notify: vi.fn() },
+    } as unknown as ReturnType<typeof makeMockCtx>);
+
+    const send = vi.fn();
+    expect(() => _routeClientMessageFrom(
+      { send } as unknown as Parameters<typeof _routeClientMessageFrom>[0],
+      { type: "list_models", id: "models-no-registry" },
+      { abort: vi.fn() },
+    )).not.toThrow();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      in_reply_to: "models-no-registry",
+      code: "internal_error",
+      message: expect.stringContaining("model registry unavailable"),
+    }));
+  });
+
   test("cancel uses freshest session_start ctx and ignores stale _lastCtx abort", async () => {
     const staleAbort = vi.fn();
     const freshAbort = vi.fn();

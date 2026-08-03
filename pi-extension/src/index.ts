@@ -80,7 +80,6 @@ import {
   handleListModels,
   type ActionCtx,
 } from "./actions/handlers.js";
-import { ensureModelRegistry } from "./actions/registry.js";
 import {
   ensureGlobalDirs,
   LOCAL_SESSION_NAME,
@@ -2055,7 +2054,7 @@ async function _handlePairRequest(
 // NOTE: this is a CAPTURED command ctx — the SDK marks it stale after a
 // session replacement (newSession/fork/switch/reload). We re-capture it via
 // `withSession` when WE drive a newSession (see the session_new dispatch).
-let _lastCtx: Pick<ExtensionContext, "ui" | "abort" | "cwd"> | null = null;
+let _lastCtx: Pick<ExtensionContext, "ui" | "abort" | "cwd" | "modelRegistry" | "model"> | null = null;
 // Freshest base ExtensionContext, re-captured on EVERY `session_start`
 // (startup/new/fork/reload/resume). The session_start ctx is always bound to
 // the CURRENT session, so compact + cancel (base-ctx methods) routed through
@@ -2063,7 +2062,7 @@ let _lastCtx: Pick<ExtensionContext, "ui" | "abort" | "cwd"> | null = null;
 // (an app Quick Action OR a `/new` typed in the Pi TUI). It carries only
 // base-ctx methods (no newSession — that's command-ctx only), so command ops
 // keep using `_lastCtx`.
-let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort" | "ui"> | null = null;
+let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort" | "ui" | "modelRegistry" | "model"> | null = null;
 const _noopCtx = { ui: { notify: () => undefined }, abort: () => undefined };
 
 // A single Pi process can load this extension TWICE in the SAME session:
@@ -2926,7 +2925,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
         const provider = sm.getDefaultProvider();
         const modelId = sm.getDefaultModel();
         if (modelId) {
-          const found = provider ? ensureModelRegistry().find(provider, modelId) : undefined;
+          const found = provider ? c.modelRegistry?.find(provider, modelId) : undefined;
           _currentModel = found?.name ?? modelId;
         }
       }
@@ -4284,6 +4283,26 @@ function _abortCurrentTurn(
   return false;
 }
 
+function _containClientMessageError(
+  sender: PlainPeerChannel,
+  msg: ClientMessage,
+  error: unknown,
+): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`[remote-pi] client message ${msg.type} failed: ${detail}`);
+  try {
+    sender.send({
+      type: "error",
+      code: "internal_error",
+      in_reply_to: msg.id,
+      message: detail || "remote-pi client message failed",
+    });
+  } catch {
+    // Transport may already be closed; containment is more important than
+    // delivering the diagnostic.
+  }
+}
+
 export function _routeClientMessageFrom(
   sender: PlainPeerChannel,
   msg: ClientMessage,
@@ -4319,7 +4338,8 @@ export function _routeClientMessageFrom(
     return;
   }
   if (!_pi) return;
-  switch (msg.type) {
+  try {
+    switch (msg.type) {
     case "queued_message_set": {
       const text = msg.text.trim();
       if (!text) {
@@ -4490,22 +4510,34 @@ export function _routeClientMessageFrom(
       })();
       break;
     }
-    case "model_set":
+    case "model_set": {
+      const actionCtx = (_lastEventCtx ?? _lastCtx) as ActionCtx | null;
       void handleModelSet(
         _pi,
-        (_lastEventCtx ?? _lastCtx) as ActionCtx | null,
-        ensureModelRegistry(),
+        actionCtx,
+        actionCtx?.modelRegistry,
         sender,
         msg,
         _persistModelDefault,
-      );
+      ).catch((error) => _containClientMessageError(sender, msg, error));
       break;
+    }
     case "thinking_set":
       handleThinkingSet(_pi, sender, msg);
       break;
-    case "list_models":
-      handleListModels(((_lastEventCtx ?? _lastCtx) as ActionCtx | null), ensureModelRegistry(), sender, msg);
+    case "list_models": {
+      const actionCtx = (_lastEventCtx ?? _lastCtx) as ActionCtx | null;
+      void handleListModels(actionCtx, actionCtx?.modelRegistry, sender, msg)
+        .catch((error) => _containClientMessageError(sender, msg, error));
       break;
+    }
+    }
+  } catch (error) {
+    // WebSocket/relay callbacks are process boundaries: a malformed message,
+    // an SDK compatibility mismatch, or a stale context must never escape as
+    // an uncaughtException and terminate Pi. Best-effort report the failure to
+    // the requesting app; even a broken sender is contained here.
+    _containClientMessageError(sender, msg, error);
   }
 }
 
