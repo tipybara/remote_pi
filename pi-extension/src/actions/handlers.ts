@@ -91,7 +91,10 @@ export interface ActionCtx {
   newSession?: (options?: {
     withSession?: (ctx: ActionCtx) => Promise<void>;
   }) => Promise<{ cancelled: boolean }>;
+  /** Legacy command-context accessor retained for older Pi versions. */
   getModel?: () => Model<any> | undefined;
+  /** Current model exposed directly by Pi 0.83+ event contexts. */
+  model?: Model<any>;
   /**
    * Live session registry from Pi's extension ctx. Includes providers/models
    * registered dynamically via `pi.registerProvider(...)`, unlike the fallback
@@ -105,7 +108,7 @@ export interface ActionCtx {
  * but lets tests fake catalogs without instantiating the real one.
  */
 export interface ActionModelRegistry {
-  refresh(): void;
+  refresh(): void | Promise<void>;
   getAvailable(): Model<any>[];
   find(provider: string, modelId: string): Model<any> | undefined;
 }
@@ -240,18 +243,20 @@ export function handleThinkingSet(
 export async function handleModelSet(
   pi: ActionPi,
   ctx: ActionCtx | null,
-  reg: ActionModelRegistry,
+  reg: ActionModelRegistry | null | undefined,
   sender: ActionReplySender,
   msg: ModelSetMsg,
   onPersist?: (provider: string, modelId: string) => void,
 ): Promise<void> {
   await runAsync(sender, msg, "model_set", async () => {
-    // Prefer Pi's LIVE session registry when available so the app sees models
-    // registered dynamically by extensions via `pi.registerProvider(...)`.
-    // Fall back to remote-pi's own disk-backed registry when no ctx exists.
+    // Prefer Pi's LIVE session registry so dynamically registered providers
+    // remain visible. The injected fallback exists only for older contexts and
+    // tests; remote-pi no longer constructs a disk-backed registry itself.
     const liveReg = ctx?.modelRegistry ?? reg;
-    // Refresh first so a model just-added via `/login` is visible.
-    liveReg.refresh();
+    if (!liveReg) throw new Error("model registry unavailable (no active Pi session context)");
+    // Refresh first so a model just-added via `/login` is visible. Pi 0.83
+    // made this async; awaiting also remains compatible with older void APIs.
+    await liveReg.refresh();
     const model = liveReg.find(msg.provider, msg.model_id);
     if (!model) {
       throw new Error(`model "${msg.provider}/${msg.model_id}" not in registry`);
@@ -268,22 +273,23 @@ export async function handleModelSet(
   });
 }
 
-export function handleListModels(
+export async function handleListModels(
   ctx: ActionCtx | null,
-  reg: ActionModelRegistry,
+  reg: ActionModelRegistry | null | undefined,
   sender: ActionReplySender,
   msg: ListModelsMsg,
-): void {
+): Promise<void> {
   // refresh() can throw if `models.json` is malformed — wrap in try so the
   // app gets an explicit error reply instead of a silent drop.
   try {
-    // Prefer Pi's LIVE session registry when available so the app sees models
-    // registered dynamically by extensions via `pi.registerProvider(...)`.
-    // Fall back to remote-pi's own disk-backed registry when no ctx exists.
+    // Prefer Pi's LIVE session registry so dynamically registered providers
+    // remain visible. The injected fallback exists only for older contexts and
+    // tests; remote-pi no longer constructs a disk-backed registry itself.
     const liveReg = ctx?.modelRegistry ?? reg;
-    liveReg.refresh();
+    if (!liveReg) throw new Error("model registry unavailable (no active Pi session context)");
+    await liveReg.refresh();
     const models = liveReg.getAvailable().map(wireFromModel);
-    const current = ctx?.getModel?.();
+    const current = ctx?.getModel?.() ?? ctx?.model;
     sender.send({
       type: "models_list",
       in_reply_to: msg.id,
