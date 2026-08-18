@@ -7,9 +7,9 @@
 
 export const PEERS_WIDGET_KEY = "remote-pi:peers-online";
 
-/** Build the chip label from online peer display names (excl. self). */
-export function formatOnlinePeersLabel(names: readonly string[]): string {
-  return `🟢 online: ${names.join(" · ")}`;
+/** Build the chip label from this session's assigned mesh name. */
+export function formatOnlinePeersLabel(name: string): string {
+  return `🟢 online: ${name}`;
 }
 
 /**
@@ -64,11 +64,11 @@ export function onlinePeerNames(
 }
 
 /** Minimal Component-shaped factory for `ui.setWidget`. */
-export function makeRightAlignedPeersWidget(names: readonly string[]): () => {
+export function makeRightAlignedPeersWidget(name: string): () => {
   render: (width: number) => string[];
   invalidate: () => void;
 } {
-  const label = formatOnlinePeersLabel(names);
+  const label = formatOnlinePeersLabel(name);
   return () => ({
     render: (width: number) => [renderRightAlignedLine(label, width)],
     invalidate() {},

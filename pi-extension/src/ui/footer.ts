@@ -40,23 +40,10 @@ const K_PEER = "remote-pi:peer-active";
 
 export function updateFooter(ctx: FooterContext, state: FooterState): void {
   const agentName = state.agentName?.trim();
-  ctx.ui.setStatus(K_NAME, agentName || undefined);
-
-  if (state.session) {
-    const count = state.peerCount ?? 0;
-    ctx.ui.setStatus(K_SESSION, `📡 ${state.session} (${count})`);
-  } else {
-    ctx.ui.setStatus(K_SESSION, undefined);
-  }
-
-  if (state.relayOn) {
-    ctx.ui.setStatus(
-      K_RELAY,
-      state.hasPairings ? "🟢 relay" : "🟡 relay waiting for pairing",
-    );
-  } else {
-    ctx.ui.setStatus(K_RELAY, undefined);
-  }
+  // Name + relay + local peer count already live on the editor top border.
+  ctx.ui.setStatus(K_NAME, undefined);
+  ctx.ui.setStatus(K_SESSION, undefined);
+  ctx.ui.setStatus(K_RELAY, undefined);
 
   if (state.devicePaired) {
     ctx.ui.setStatus(K_PEER, `📱 ${state.devicePaired}`);

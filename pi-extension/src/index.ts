@@ -109,7 +109,6 @@ import { runSetupWizard, type WizardUI } from "./session/setup_wizard.js";
 import { updateFooter, type FooterState } from "./ui/footer.js";
 import {
   PEERS_WIDGET_KEY,
-  makeRightAlignedPeersWidget,
   onlinePeerNames,
 } from "./ui/peers_widget.js";
 import { join, dirname, resolve } from "node:path";
@@ -814,14 +813,13 @@ function _safePiSendMessage(
   }
 }
 
-function _updatePeersWidget(ui?: { setWidget?: (k: string, v: unknown) => void } | null): void {
+/** Clears the right-aligned peers chip; editor-border UI owns mesh status. */
+function _updatePeersWidget(ui?: {
+  setWidget?: (k: string, v: unknown) => void;
+} | null): void {
   if (!ui || typeof ui.setWidget !== "function") return;
   try {
-    if (_state === "idle" || _peerNames.length === 0) {
-      ui.setWidget(PEERS_WIDGET_KEY, undefined);
-      return;
-    }
-    ui.setWidget(PEERS_WIDGET_KEY, makeRightAlignedPeersWidget(_peerNames));
+    ui.setWidget(PEERS_WIDGET_KEY, undefined);
   } catch {
     // Widget updates are best-effort across session replacement.
   }
@@ -858,6 +856,13 @@ function _refreshFooter(ctx?: { ui?: { setStatus?: unknown; setTitle?: unknown; 
       state,
     );
     _updatePeersWidget(ui);
+    const g = globalThis as Record<symbol, unknown>;
+    g[Symbol.for("pi.remote-pi.relay-status")] = {
+      relayOn: state.relayOn === true,
+      hasPairings: state.hasPairings === true,
+    };
+    const requestEditorRender = g[Symbol.for("pi.editor.requestRender")];
+    if (typeof requestEditorRender === "function") requestEditorRender();
   } catch {
     // UI methods can throw if the runner goes stale mid-call.
   }
@@ -2389,6 +2394,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // bound to the current session.
   pi.on("session_start", (_event, ctx) => {
     _lastEventCtx = ctx;
+    _updatePeersWidget(ctx.ui);
     if (!_pi) _pi = pi;
     // session_shutdown disposes per-session pi-ask subscriptions. A host that
     // reuses this module instance does NOT re-run the factory, so rebind the

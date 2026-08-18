@@ -33,10 +33,8 @@ describe("onlinePeerNames", () => {
 });
 
 describe("right-aligned peers widget", () => {
-  test("label lists peers", () => {
-    expect(formatOnlinePeersLabel(["alpha", "beta"])).toBe(
-      "🟢 online: alpha · beta",
-    );
+  test("label is this session's mesh name", () => {
+    expect(formatOnlinePeersLabel("libra")).toBe("🟢 online: libra");
   });
 
   test("render pads to the right edge", () => {
@@ -54,7 +52,7 @@ describe("right-aligned peers widget", () => {
   });
 
   test("widget factory returns right-aligned row", () => {
-    const factory = makeRightAlignedPeersWidget(["alpha"]);
+    const factory = makeRightAlignedPeersWidget("alpha");
     const comp = factory();
     const row = comp.render(40)[0]!;
     expect(row.trimStart()).toBe("🟢 online: alpha");

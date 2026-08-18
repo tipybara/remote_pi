@@ -22,55 +22,26 @@ function makeMockCtx(): FooterContext & {
 }
 
 describe("updateFooter — footer slots ('local' rendering)", () => {
-  test("agent-name slot is set first so alpha status sort keeps it leftmost", () => {
+  test("name / session / relay slots stay cleared (moved to editor border)", () => {
     const ctx = makeMockCtx();
     updateFooter(ctx, {
       session: "local",
-      peerCount: 1,
-      relayOn: false,
+      peerCount: 3,
+      relayOn: true,
+      hasPairings: true,
       agentName: "backend",
     });
-    expect(ctx.statusCalls[0]).toEqual({
-      key: "remote-pi:agent-name",
-      value: "backend",
-    });
-    // Lexicographic key order: agent-name < peer-active < relay < session
-    const keys = ctx.statusCalls.map((c) => c.key).filter((k) => k.startsWith("remote-pi:"));
-    const sorted = [...keys].sort();
-    expect(sorted[0]).toBe("remote-pi:agent-name");
+    expect(ctx.statusCalls.find((c) => c.key === "remote-pi:agent-name")?.value).toBeUndefined();
+    expect(ctx.statusCalls.find((c) => c.key === "remote-pi:session")?.value).toBeUndefined();
+    expect(ctx.statusCalls.find((c) => c.key === "remote-pi:relay")?.value).toBeUndefined();
   });
 
-  test("agent-name slot cleared when name missing/blank", () => {
+  test("keeps the active-device slot", () => {
     const ctx = makeMockCtx();
-    updateFooter(ctx, { session: "local", peerCount: 0, agentName: "  " });
-    const nameSlot = ctx.statusCalls.find((c) => c.key === "remote-pi:agent-name");
-    expect(nameSlot?.value).toBeUndefined();
-  });
-
-  test("session slot shows 'local' when joined to the mesh", () => {
-    const ctx = makeMockCtx();
-    const state: FooterState = {
-      session: "local",
-      peerCount: 3,
-      relayOn: false,
-    };
-    updateFooter(ctx, state);
-    const sessionSlot = ctx.statusCalls.find((c) => c.key === "remote-pi:session");
-    expect(sessionSlot?.value).toBe("📡 local (3)");
-  });
-
-  test("session slot cleared when not joined", () => {
-    const ctx = makeMockCtx();
-    updateFooter(ctx, { relayOn: false });
-    const sessionSlot = ctx.statusCalls.find((c) => c.key === "remote-pi:session");
-    expect(sessionSlot?.value).toBeUndefined();
-  });
-
-  test("singular peer count keeps numeric form (no pluralization in footer)", () => {
-    const ctx = makeMockCtx();
-    updateFooter(ctx, { session: "local", peerCount: 1, relayOn: false });
-    const sessionSlot = ctx.statusCalls.find((c) => c.key === "remote-pi:session");
-    expect(sessionSlot?.value).toBe("📡 local (1)");
+    updateFooter(ctx, { devicePaired: "qAoPpAbg" });
+    expect(ctx.statusCalls.find((c) => c.key === "remote-pi:peer-active")?.value).toBe(
+      "📱 qAoPpAbg",
+    );
   });
 });
 
