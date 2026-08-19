@@ -85,6 +85,7 @@ import {
   handleListModels,
   type ActionCtx,
 } from "./actions/handlers.js";
+import { ensureModelRegistry } from "./actions/registry.js";
 import {
   ensureGlobalDirs,
   LOCAL_SESSION_NAME,
@@ -814,12 +815,10 @@ function _safePiSendMessage(
 }
 
 /** Clears the right-aligned peers chip; editor-border UI owns mesh status. */
-function _updatePeersWidget(ui?: {
-  setWidget?: (k: string, v: unknown) => void;
-} | null): void {
+function _updatePeersWidget(ui?: { setWidget?: unknown } | null): void {
   if (!ui || typeof ui.setWidget !== "function") return;
   try {
-    ui.setWidget(PEERS_WIDGET_KEY, undefined);
+    (ui.setWidget as (key: string, content: undefined) => void)(PEERS_WIDGET_KEY, undefined);
   } catch {
     // Widget updates are best-effort across session replacement.
   }
