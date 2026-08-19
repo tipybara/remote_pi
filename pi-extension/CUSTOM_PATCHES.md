@@ -19,6 +19,12 @@ Upstream base: `jacobaraujo7/remote_pi` → `pi-extension` (`remote-pi@0.7.0`).
    - Clears duplicate agent/session/relay footer slots and peers widget.
    - Retains active mobile-device footer slot.
 
+5. **Pi session name is authoritative** — `src/index.ts`
+   - Relay metadata, pair responses, QR payloads, and Cockpit labels use `pi.getSessionName()`.
+   - Empty sessions default to `<project>-<8-char-session-id>`; forked sessions receive a fresh default.
+   - `/name` changes reopen the Relay room so app-visible names stay exact.
+   - Mesh `agent_name` remains an independent routing alias.
+
 ## Validation
 
 ```bash

@@ -315,6 +315,20 @@ function _setCurrentModel(name: string): void {
   }
 }
 
+let _explicitSessionRenameTarget: string | null = null;
+
+async function _publishSessionDisplayName(name: string): Promise<void> {
+  if (_myRoomMeta?.name === name) return;
+  if (_state === "idle" || _disposed) {
+    if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, name };
+    return;
+  }
+
+  const ctx = _lastEventCtx ?? _controlCtx();
+  _goIdle("peer_stop");
+  if (!_disposed) await _cmdStart(ctx);
+}
+
 /**
  * Plan/32: publish the `working` flag as room_meta (raw, no debounce — the
  * app debounces). Same shape as model/thinking updates. Used by turn_start/end
@@ -1304,29 +1318,39 @@ function _detachPeerChannel(appPeerId: string): void {
 
 // ── Display-name helpers ──────────────────────────────────────────────────────
 
-/**
- * Resolves the name this Pi shows to the mobile app and the relay's
- * `room_meta.name`. Single source of truth for "what does this Pi call
- * itself when talking to others".
- *
- * Resolution order:
- *   1. Broker-assigned name (when this Pi is on the local UDS mesh) — may
- *      carry a `#N` suffix from a name collision. Matches what other
- *      agents see, so the mobile UI shows the exact same string.
- *   2. `agent_name` from `<cwd>/.pi/remote-pi/config.json` — set by the
- *      wizard on first run; this is "the name the user configured".
- *   3. `defaultAgentName(cwd)` (parent/folder) — fallback when no config
- *      exists yet and the mesh hasn't been joined.
- *
- * Pre-2026-05-23 callers computed `cwd.split('/').slice(-2).join('/')`
- * inline at three different sites (pair_ok, room_meta, QR URI); this
- * helper consolidates them and lifts the user's configured name above
- * the raw cwd path.
- */
+/** Name exposed by Relay room metadata, pair_ok, and pairing QR payloads. */
 function _displayName(cwd: string): string {
-  if (_meshNode) return _meshNode.name();
-  const local = loadLocalConfig(cwd);
-  return local.agent_name || defaultAgentName(cwd);
+  const getSessionName = (_pi as { getSessionName?: () => string | undefined } | null)
+    ?.getSessionName;
+  const sessionName = getSessionName?.call(_pi)?.trim();
+  return sessionName || defaultAgentName(cwd);
+}
+
+function _defaultPiSessionName(cwd: string, sessionId: string): string {
+  const shortSessionId = sessionId.trim().slice(0, 8);
+  const projectName = defaultAgentName(cwd);
+  return shortSessionId ? `${projectName}-${shortSessionId}` : projectName;
+}
+
+function _ensureDefaultPiSessionName(
+  pi: ExtensionAPI,
+  reason: string | undefined,
+  ctx: Partial<Pick<ExtensionContext, "cwd" | "sessionManager">>,
+): string | undefined {
+  const getSessionName = (pi as unknown as { getSessionName?: () => string | undefined })
+    .getSessionName;
+  const currentName = getSessionName?.call(pi)?.trim();
+  if (currentName && reason !== "fork") return currentName;
+
+  const cwd = ctx.cwd;
+  const sessionId = ctx.sessionManager?.getSessionId();
+  const setSessionName = (pi as unknown as { setSessionName?: (name: string) => void })
+    .setSessionName;
+  if (!cwd || !sessionId || !setSessionName) return currentName;
+
+  const defaultName = _defaultPiSessionName(cwd, sessionId);
+  setSessionName.call(pi, defaultName);
+  return defaultName;
 }
 
 // ── Peer lookup helpers ───────────────────────────────────────────────────────
@@ -1748,22 +1772,18 @@ export async function _handleControl(cmd: string): Promise<void> {
 
 /**
  * Rename the agent LIVE (plan/38/41), without restarting the process or losing
- * the SDK session/conversation. Touches two layers:
- *   1. **Broker (mesh)**: `MeshNode.rename` does a soft leave+rejoin → new
- *      address `<cwd>@<newName>` (broker may add `#N` on a same-(cwd,name)
- *      collision — we use the assigned result).
- *   2. **Relay room (App↔Pi)**: the room is keyed by `(cwd, name)`, so the new
- *      name = a new room. We cycle the relay (`_goIdle` → `_cmdStart`) so the
- *      room follows; the app re-keys the conversation onto the new tile (the
- *      inherent cost of room-per-name). Skipped when the relay was off.
- * Finally re-emits `remote-pi:name-assigned` so the Cockpit updates its label.
- *
- * The explicit name IS persisted (decision E only skips the runtime `#N`).
+ * the SDK session/conversation. The Pi session name is the app-visible source
+ * of truth; `agent_name` remains the local mesh routing alias. Relay restarts
+ * so its room follows the new session name, while MeshNode soft-rejoins under
+ * the matching routing alias (possibly with a broker-only `#N` suffix).
  */
 async function _renameAgent(newName: string): Promise<void> {
   if (!newName) return;  // empty rename → no-op
   const ctx = _controlCtx();
   const cwd = process.cwd();
+  _explicitSessionRenameTarget = newName;
+  (_pi as { setSessionName?: (name: string) => void } | null)
+    ?.setSessionName?.(newName);
   saveLocalConfig(cwd, { agent_name: newName });
 
   if (!_meshNode) {
@@ -1784,14 +1804,19 @@ async function _renameAgent(newName: string): Promise<void> {
     ctx.ui.notify(`[remote-pi] rename failed: ${String(err)}`, "error");
   }
 
-  if (wasStarted && !_disposed) await _cmdStart(ctx);  // relay back up → roomIdFor(cwd, assigned)
+  if (wasStarted && !_disposed) await _cmdStart(ctx);  // relay back up under the Pi session name
 
+  const displayName = _displayName(cwd);
   _safePiSendMessage({
     customType: "remote-pi:name-assigned",
-    content: assigned === newName
-      ? `Mesh name: ${assigned}`
-      : `Mesh name reassigned: "${newName}" → "${assigned}" (collision)`,
-    details: { requested: newName, assigned, changed: assigned !== newName },
+    content: `Session name: ${displayName}`,
+    details: {
+      requested: displayName,
+      assigned: displayName,
+      changed: false,
+      meshAssigned: assigned,
+      meshChanged: assigned !== newName,
+    },
     display: false,
   });
 }
@@ -2092,7 +2117,7 @@ let _lastCtx: Pick<ExtensionContext, "ui" | "abort" | "cwd" | "modelRegistry" | 
 // (an app Quick Action OR a `/new` typed in the Pi TUI). It carries only
 // base-ctx methods (no newSession — that's command-ctx only), so command ops
 // keep using `_lastCtx`.
-let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort" | "ui" | "modelRegistry" | "model"> | null = null;
+let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort" | "ui" | "modelRegistry" | "model" | "cwd" | "sessionManager"> | null = null;
 const _noopCtx = { ui: { notify: () => undefined }, abort: () => undefined };
 
 // A single Pi process can load this extension TWICE in the SAME session:
@@ -2220,6 +2245,24 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       room_id: _myRoomId,
       meta: { thinking: level },
     });
+  });
+
+  const onSessionInfoChanged = pi.on.bind(pi) as unknown as (
+    event: "session_info_changed",
+    handler: (event: { name?: string }) => void,
+  ) => void;
+  onSessionInfoChanged("session_info_changed", (event) => {
+    const name = event.name?.trim()
+      || (_lastEventCtx
+        ? _ensureDefaultPiSessionName(pi, undefined, _lastEventCtx)
+        : undefined);
+    if (!name) return;
+    if (name === _explicitSessionRenameTarget) {
+      _explicitSessionRenameTarget = null;
+      return;
+    }
+    _explicitSessionRenameTarget = null;
+    void _publishSessionDisplayName(name);
   });
 
   pi.on("agent_start", () => {
@@ -2391,8 +2434,10 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // "stale after session replacement" crash when the app taps Compact after a
   // New session. Fires on startup/new/fork/reload/resume; the ctx is always
   // bound to the current session.
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", (event, ctx) => {
     _lastEventCtx = ctx;
+    const displayName = _ensureDefaultPiSessionName(pi, event.reason, ctx);
+    if (displayName) void _publishSessionDisplayName(displayName);
     _updatePeersWidget(ctx.ui);
     if (!_pi) _pi = pi;
     // session_shutdown disposes per-session pi-ask subscriptions. A host that
@@ -4354,25 +4399,20 @@ async function _cmdJoin(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void
     // arrives — the newcomer doesn't get retroactive joined events. Ask the
     // broker for the live peer list to seed the count correctly on join.
     _refreshSessionPeerCount(peer, ctx);
-    // Tell RPC clients (e.g. Cockpit) the EFFECTIVE mesh name. The broker
-    // appends a `#N` suffix only on a same-(cwd,name) collision, so the name we
-    // requested and the one actually assigned can differ. Emit a pure-data event
-    // (display:false) carrying both + a `changed` flag so the client can rename
-    // the agent in its own UI to match what the mesh/relay will show. Fired on
-    // every join (incl. failover re-elect, which can re-assign the name), so the
-    // client always reflects the live name, not just the first one.
-    //
-    // plan/38 decision E: we deliberately DO NOT persist `assigned`. A `#N` is a
-    // RUNTIME collision resolution; freezing it into `agent_name` fossilizes an
-    // accident and causes cross-folder name ping-pong across restarts. The clean
-    // name (wizard / explicit `agent_name`) already lives in config or re-derives
-    // from `basename(cwd)`; the event above carries the live `#N` for the UI.
+    // Cockpit uses `assigned` as its visible label, so keep it identical to the
+    // Pi session name. Broker collision suffixes remain diagnostics only and do
+    // not leak into the app-visible identity.
+    const displayName = _displayName(cwd);
     _safePiSendMessage({
       customType: "remote-pi:name-assigned",
-      content: assigned === requestedName
-        ? `Mesh name: ${assigned}`
-        : `Mesh name reassigned: "${requestedName}" → "${assigned}" (collision)`,
-      details: { requested: requestedName, assigned, changed: assigned !== requestedName },
+      content: `Session name: ${displayName}`,
+      details: {
+        requested: displayName,
+        assigned: displayName,
+        changed: false,
+        meshAssigned: assigned,
+        meshChanged: assigned !== requestedName,
+      },
       display: false,
     });
     ctx.ui.notify(

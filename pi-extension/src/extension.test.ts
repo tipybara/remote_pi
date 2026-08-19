@@ -4560,11 +4560,14 @@ describe("local config owns mesh name", () => {
 
 describe("relay control channel + relay-state event", () => {
   function makeSpyPi(sendMessage: ReturnType<typeof vi.fn>) {
+    let sessionName = "pi-extension";
     return {
       on: () => undefined, registerCommand: () => undefined,
       registerTool: () => undefined, registerShortcut: () => undefined,
       registerFlag: () => undefined, getFlag: () => undefined,
       registerMessageRenderer: () => undefined,
+      getSessionName: () => sessionName,
+      setSessionName: (name: string) => { sessionName = name; },
       sendMessage, sendUserMessage: () => undefined,
     } as unknown as ExtensionAPI;
   }
@@ -5854,6 +5857,43 @@ describe("model meta", () => {
       else process.env["PI_CODING_AGENT_DIR"] = prevAgentDir;
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+
+  test("relay room_meta name exactly matches the Pi session name", async () => {
+    const capturedOpts: Array<{ roomMeta?: { name?: string } }> = [];
+    _defaultConnectImpl = async (opts?: unknown) => {
+      capturedOpts.push(opts as { roomMeta?: { name?: string } });
+    };
+
+    captureHandler("remote-pi");
+    _setPiForTest({
+      getSessionName: () => "dotfiles-019ffb64",
+      getThinkingLevel: () => "high",
+    });
+    await _connectForTest(makeMockCtx("/tmp/mesh-config-must-not-be-the-display-name"));
+
+    expect(capturedOpts).toHaveLength(1);
+    expect(capturedOpts[0]!.roomMeta?.name).toBe("dotfiles-019ffb64");
+  });
+
+  test("session_info_changed reopens the relay under the exact new session name", async () => {
+    const capturedOpts: Array<{ roomMeta?: { name?: string } }> = [];
+    _defaultConnectImpl = async (opts?: unknown) => {
+      capturedOpts.push(opts as { roomMeta?: { name?: string } });
+    };
+    const onSessionInfoChanged = captureEventHandler("session_info_changed");
+    let sessionName = "before-019ffb64";
+    _setPiForTest({
+      getSessionName: () => sessionName,
+      getThinkingLevel: () => "high",
+    });
+    await _connectForTest(makeMockCtx("/tmp/remote-pi-session-rename"));
+
+    sessionName = "after-019ffb64";
+    onSessionInfoChanged({ type: "session_info_changed", name: sessionName });
+
+    await vi.waitFor(() => expect(capturedOpts).toHaveLength(2));
+    expect(capturedOpts[1]!.roomMeta?.name).toBe("after-019ffb64");
   });
 
   test("pi.on('model_select') fires room_meta_update via relay.sendControl", async () => {
