@@ -2934,8 +2934,39 @@ async function _cmdSetup(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
 }
 
 async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void> {
+  // Pi invalidates captured extension contexts on new/fork/switch/reload. Start
+  // can cross multiple awaits, so snapshot every value we need before the first
+  // one and wrap notifications; no continuation may dereference ctx directly.
+  let cwd = process.cwd();
+  let notifyTarget: ((message: string, level?: "info" | "warning" | "error") => void) | undefined;
+  const modelCtx: ActionCtx = {};
+  try {
+    const candidate = ctx as Partial<ExtensionContext> & ActionCtx;
+    if (typeof candidate.cwd === "string" && candidate.cwd) cwd = candidate.cwd;
+  } catch { /* ctx was already stale — process cwd is the safe room identity */ }
+  try {
+    const ui = (ctx as Partial<ExtensionContext>).ui;
+    if (ui && typeof ui.notify === "function") notifyTarget = ui.notify.bind(ui);
+  } catch { /* stale ctx — _safeNotify will use the current session if available */ }
+  try {
+    const candidate = ctx as Partial<ExtensionContext> & ActionCtx;
+    modelCtx.model = candidate.getModel?.() ?? candidate.model;
+  } catch { /* model is optional; settings fallback below remains available */ }
+  try {
+    modelCtx.modelRegistry = (ctx as Partial<ExtensionContext> & ActionCtx).modelRegistry;
+  } catch { /* registry cache/stub remains available */ }
+  const notify = (message: string, level: "info" | "warning" | "error" = "info") => {
+    try {
+      if (notifyTarget) {
+        notifyTarget(message, level);
+        return;
+      }
+    } catch { /* bound UI became stale after the snapshot */ }
+    _safeNotify(message, level);
+  };
+
   if (_state !== "idle") {
-    ctx.ui.notify("[remote-pi] Already started.", "warning");
+    notify("[remote-pi] Already started.", "warning");
     return;
   }
   const lifecycleGeneration = ++_relayLifecycleGeneration;
@@ -2960,7 +2991,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
       // to mint a new key (that's what silently broke pairing after idle), so
       // abort cleanly with an actionable message instead of crashing or
       // re-pairing. Unlocking the keychain and re-running fixes it.
-      ctx.ui.notify(
+      notify(
         "[remote-pi] Could not read this machine's identity: the system " +
         "keychain is locked or access was denied. Unlock it (open the app / " +
         "log in) and run /remote-pi again. Your pairing is NOT lost. " +
@@ -2975,7 +3006,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
       // session that paired). Minting a fresh key here would make SelfRevoke
       // wipe peers.json seconds later and take the phone offline, so storage
       // refuses. Surface the actionable fix instead of failing silently.
-      ctx.ui.notify(
+      notify(
         "[remote-pi] Could not read this machine's identity, but devices are " +
         "already paired — refusing to generate a new one (that would revoke " +
         "them). This process likely cannot reach the same keyring as the " +
@@ -2997,7 +3028,6 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   const { url: relayUrl, source } = resolveRelayUrl();
   const myShort = Buffer.from(edKp.publicKey).toString("base64").slice(0, 8);
 
-  const cwd = "cwd" in ctx ? (ctx as ExtensionCommandContext).cwd : process.cwd();
   // Same name we send in pair_ok — keeps room_meta.name and the per-pair
   // session_name aligned so the app shows consistent labels.
   const sessionName = _displayName(cwd);
@@ -3017,11 +3047,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   // the SDK resolves the model lazily.
   if (!_currentModel) {
     try {
-      const c = ctx as Partial<ExtensionContext> & {
-        model?: { name?: string; id?: string };
-        getModel?: () => { name?: string; id?: string } | undefined;
-      };
-      // Prefer the live getModel() / ctx.model — populated for an interactive
+      // Prefer the snapshotted getModel() / ctx.model — populated for an interactive
       // Pi. For a HEADLESS DAEMON both are undefined at connect: the SDK only
       // resolves `this.model` lazily at the first turn, and `model_select`
       // never fires for a default-model session. So fall back to the CONFIGURED
@@ -3029,7 +3055,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
       // model the daemon will actually use. Without this an idle daemon (never
       // prompted → no turn) would never report its model and the app shows
       // "unknown". turn_start still hydrates a later override.
-      const live = c.getModel?.() ?? c.model;
+      const live = modelCtx.model;
       if (live) {
         _currentModel = live.name ?? live.id ?? undefined;
       } else {
@@ -3038,8 +3064,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
         const modelId = sm.getDefaultModel();
         if (modelId) {
           const found = provider
-            ? ensureModelRegistry((c ?? _lastEventCtx ?? _lastCtx) as unknown as ActionCtx | null)
-                .find(provider, modelId)
+            ? ensureModelRegistry(modelCtx).find(provider, modelId)
             : undefined;
           _currentModel = found?.name ?? modelId;
         }
@@ -3065,7 +3090,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   // entry that surfaces in the app as a phantom legacy session.
   _myRoomMeta = roomMeta;
 
-  ctx.ui.notify(`[remote-pi] Connecting to relay ${relayUrl} (source: ${source}, room: ${roomId})…`, "info");
+  notify(`[remote-pi] Connecting to relay ${relayUrl} (source: ${source}, room: ${roomId})…`, "info");
 
   // Transport opens WebSocket; convert the canonical http(s):// stored
   // form to ws(s):// at this boundary. The relayUrl variable keeps the
@@ -3082,13 +3107,13 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
     // only the authoritative attempt may report an error.
     if (!isCurrentCandidate()) return;
     if (err instanceof RoomAlreadyOpenError) {
-      ctx.ui.notify(
+      notify(
         "[remote-pi] Already running in this cwd. Stop the other terminal first.",
         "error",
       );
       return;
     }
-    ctx.ui.notify(`[remote-pi] relay connect failed: ${String(err)}`, "error");
+    notify(`[remote-pi] relay connect failed: ${String(err)}`, "error");
     return;
   }
 
@@ -3118,7 +3143,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   relay.on("close", () => _onRelayClose(relay));
 
   _stopAutoListener = _installAutoListener(relay);
-  _refreshFooter(ctx);
+  _refreshFooter();
 
   // SelfRevoke is the Pi path's single initial topology producer. Its first
   // coalesced sweep always publishes verified membership or a safe fallback
@@ -3201,7 +3226,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   if (!createdProducer) _attachBridgeIfReady();
 
   _emitRelayState();  // → connected
-  ctx.ui.notify(`[remote-pi] state: started (peer=${myShort}) — Connected to relay ${relayUrl}`, "info");
+  notify(`[remote-pi] state: started (peer=${myShort}) — Connected to relay ${relayUrl}`, "info");
 }
 
 /**

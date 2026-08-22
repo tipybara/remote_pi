@@ -4912,6 +4912,63 @@ describe("relay reconnect", () => {
     }
   });
 
+  test("_cmdStart snapshots ctx before keypair await so reload-stale getters cannot crash Pi", async () => {
+    const storage = await import("./pairing/storage.js");
+    const getKeypair = vi.mocked(storage.getOrCreateEd25519Keypair);
+    const keypairGate = deferred<Awaited<ReturnType<typeof storage.getOrCreateEd25519Keypair>>>();
+    const keypair = {
+      publicKey: new Uint8Array(32).fill(0x51),
+      secretKey: new Uint8Array(32).fill(0x52),
+    };
+    const cwd = `/tmp/remote-pi-stale-start-${process.pid}-${Date.now()}`;
+    const liveCtx = makeMockCtx(cwd);
+    let stale = false;
+    let settled = false;
+    let starting: Promise<void> | undefined;
+    const ctx = {
+      get ui() {
+        if (stale) throw new Error("stale ctx ui");
+        return liveCtx.ui;
+      },
+      get cwd() {
+        if (stale) throw new Error("stale ctx cwd");
+        return cwd;
+      },
+      get model() {
+        if (stale) throw new Error("stale ctx model");
+        return { id: "snapshot-model", name: "Snapshot Model" };
+      },
+      get modelRegistry() {
+        if (stale) throw new Error("stale ctx modelRegistry");
+        return undefined;
+      },
+    };
+
+    try {
+      _setCurrentModelForTest(undefined);
+      getKeypair.mockImplementationOnce(() => keypairGate.promise);
+      starting = _startRelayForTest(ctx);
+      await vi.waitFor(() => expect(getKeypair).toHaveBeenCalledTimes(1));
+
+      stale = true;
+      settled = true;
+      keypairGate.resolve(keypair);
+      await expect(starting).resolves.toBeUndefined();
+
+      expect(_getState()).toBe("started");
+      expect(relayInstances).toHaveLength(1);
+      expect(relayInstances[0]!.connect).toHaveBeenCalledWith(expect.objectContaining({
+        roomMeta: expect.objectContaining({ cwd, model: "Snapshot Model" }),
+      }));
+    } finally {
+      if (!settled) keypairGate.resolve(keypair);
+      await starting?.catch(() => undefined);
+      const stop = captureHandler("remote-pi stop");
+      await stop("", makeMockCtx(cwd));
+      _setCurrentModelForTest(undefined);
+    }
+  });
+
   test("/remote-pi stop cancels delayed keypair resolve before any Relay side effect", async () => {
     const storage = await import("./pairing/storage.js");
     const getKeypair = vi.mocked(storage.getOrCreateEd25519Keypair);
