@@ -5933,24 +5933,46 @@ describe("model meta", () => {
     expect(capturedOpts[0]!.roomMeta?.name).toBe("dotfiles-019ffb64");
   });
 
-  test("session_info_changed reopens the relay under the exact new session name", async () => {
+  test("session_info_changed reopens the relay under the exact new name without reusing stale session ctx", async () => {
     const capturedOpts: Array<{ roomMeta?: { name?: string } }> = [];
     _defaultConnectImpl = async (opts?: unknown) => {
       capturedOpts.push(opts as { roomMeta?: { name?: string } });
     };
+    const onSessionStart = captureEventHandler("session_start");
     const onSessionInfoChanged = captureEventHandler("session_info_changed");
+    const cwd = "/tmp/remote-pi-session-rename";
     let sessionName = "before-019ffb64";
     _setPiForTest({
       getSessionName: () => sessionName,
       getThinkingLevel: () => "high",
     });
-    await _connectForTest(makeMockCtx("/tmp/remote-pi-session-rename"));
+    await _connectForTest(makeMockCtx(cwd));
+
+    const liveCtx = makeMockCtx(cwd);
+    let stale = false;
+    const sessionCtx = {
+      get ui() {
+        if (stale) throw new Error("stale session ui");
+        return liveCtx.ui;
+      },
+      get cwd() {
+        if (stale) throw new Error("stale session cwd");
+        return cwd;
+      },
+      get sessionManager() {
+        if (stale) throw new Error("stale session manager");
+        return undefined;
+      },
+    };
+    onSessionStart({ type: "session_start", reason: "resume" }, sessionCtx);
+    stale = true;
 
     sessionName = "after-019ffb64";
     onSessionInfoChanged({ type: "session_info_changed", name: sessionName });
 
     await vi.waitFor(() => expect(capturedOpts).toHaveLength(2));
     expect(capturedOpts[1]!.roomMeta?.name).toBe("after-019ffb64");
+    expect(_getState()).toBe("started");
   });
 
   test("pi.on('model_select') fires room_meta_update via relay.sendControl", async () => {

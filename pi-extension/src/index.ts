@@ -324,9 +324,11 @@ async function _publishSessionDisplayName(name: string): Promise<void> {
     return;
   }
 
-  const ctx = _lastEventCtx ?? _controlCtx();
+  // Session-info callbacks may belong to the outgoing runner by the time the
+  // async relay restart continues. Room identity only needs process cwd + a
+  // safe notification sink, so never carry a session-bound ctx across it.
   _goIdle("peer_stop");
-  if (!_disposed) await _cmdStart(ctx);
+  if (!_disposed) await _cmdStart(_controlCtx());
 }
 
 /**
