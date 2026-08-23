@@ -1,77 +1,52 @@
 # Remote Pi — Pi Extension (Node + TypeScript)
 
-Extensão para o [Pi coding agent](https://github.com/earendil-works/pi) que
-adiciona o slash command `/remote-pi`. Embarca o SDK do Pi
-(`@earendil-works/pi-coding-agent`) e expõe via WebSocket pro relay.
+Pi extension for mobile Remote Pi control. Each Pi process owns one App ↔ Relay room derived from cwd + Pi session display name.
 
-Faz parte da **mesh de agentes coding cross-PC** do Remote Pi: cada PC
-roda esta extensão (Node daemon) com uma Pi-key Ed25519 no keyring do
-sistema; o celular é autenticador inicial via QR; entre PCs irmãos do
-mesmo Owner, broker UDS local + relay forward Pi-to-Pi via WS roteiam
-envelopes com prefixo `<pc>:<peer>`.
+## Product boundary
 
-Protocolo, identidades, ACK, roteamento cross-PC e trust model: ver
-[`../PROTOCOL.md`](../PROTOCOL.md) (doc canônica do repo).
+Keep:
+
+- Relay WebSocket lifecycle, QR pairing, Owner channels, mobile commands, room metadata, reconnect.
+- Signed Owner membership/self-revoke and existing pairing storage.
+- Daemon registry, supervisor/service/cron control, RPC child, and supervisor IPC.
+
+Do not add back:
+
+- Local UDS agent broker, leader/follower election, peer roster/count.
+- Agent-to-agent tools, Claude mesh launcher, agent-network skill.
+- Cross-PC broker bridge or Pi-envelope production.
+
+Backward-compatible Relay membership endpoints may remain because signed mobile self-revoke consumes them.
 
 ## Stack
 
-- Node 20+ / TypeScript 6
-- **Module system**: ESM only (NodeNext). Imports com extensão `.js` mesmo em `.ts`
-- Package manager: **pnpm** (não usar npm/yarn)
-- Crypto: libsodium-wrappers (Curve25519 + ChaCha20-Poly1305)
-- Pi-secret storage: `@napi-rs/keyring` (Keychain macOS / libsecret Linux desktop / Credential Manager Windows). Headless Linux sem D-Bus cai pra `~/.pi/remote/identity.json` (`chmod 0600`) com warning — instale GNOME Keyring/KWallet pra hardening real.
+- Node 20+ / TypeScript 6, ESM NodeNext.
+- pnpm only.
+- `@napi-rs/keyring` for Pi identity, with existing file fallback policy.
+- `ws` for Relay transport.
 
-## Comandos
+## Commands
 
-- `pnpm install` — instala deps
-- `pnpm typecheck` — `tsc --noEmit`, deve passar zero erros
-- `pnpm build` — `tsc`, gera `dist/`
-- `pnpm dev` — `tsx src/index.ts`, executa direto sem build
+```bash
+pnpm install
+pnpm test
+pnpm typecheck
+rm -rf dist && pnpm build
+```
 
-## Configuração do relay
+## Relay startup
 
-Ordem de resolução (precedência):
+Resolution precedence:
 
-1. `process.env.REMOTE_PI_RELAY` — escape hatch pra CI/ops
-2. `~/.pi/remote/config.json` (`{ "relay": "..." }`) — persistido via
-   `/remote-pi set-relay <url>`
-3. `kDefaultRelayUrl` (`https://relay-rp1.jacobmoura.work`) — produção
+1. `REMOTE_PI_RELAY`
+2. `~/.pi/remote/config.json`
+3. built-in default
 
-Slash commands:
+`/remote-pi` starts Relay directly. `auto_start_relay` only gates automatic `session_start` startup. `/remote-pi stop` disconnects current Pi process Relay. Rename must reopen Relay under updated cwd + Pi session display-name room.
 
-- `/remote-pi set-relay <http://… | https://…>` — grava URL em
-  `~/.pi/remote/config.json`. Validação rejeita `ws://`, `wss://`,
-  string vazia e URLs malformadas (a extensão converte http(s)→ws(s)
-  internamente ao abrir o WebSocket).
-- `/remote-pi config` — mostra a URL efetiva atual + de qual fonte vem
-  (`env`/`config`/`default`).
+## Conventions
 
-`_cmdStart` chama `resolveRelayUrl()` e exibe o `source` no notify
-("Connecting to relay <url> (source: …)") pra QA validar.
-
-## Dependências importantes
-
-- `@earendil-works/pi-coding-agent` — SDK do Pi (`AgentSession`, `SessionManager`, `ModelRegistry`)
-- `ws` — WebSocket client
-
-## Convenções
-
-- **Strict TS**: `"strict": true`, sem `any` exceto onde inevitável (use `unknown` + narrow)
-- **Imports**: `import { foo } from "./bar.js"` (extensão obrigatória em ESM)
-- **Top-level await** ok (ESM permite)
-- **Erros**: `class XxxError extends Error` para classes nomeadas, throw cedo no boundary
-- **Logging**: `console.log` ok no MVP; depois migrar pra `pino` ou similar
-
-## NÃO fazer
-
-- Não escrever CommonJS (`require`, `module.exports`)
-- Não comitar `dist/` (já no .gitignore raiz)
-- Não criptografar/descriptografar de forma custom — usar libsodium
-- Não introduzir dependência que não seja ESM-friendly
-
-## Modo orquestrado
-
-Se receber um prompt começando com `[ORCH:<task-id>]`, leia
-`../.orchestration/INSTRUCTIONS.md` antes de qualquer outra ação. Esse marker
-indica que outro agente está coordenando o trabalho e tem regras específicas
-(onde escrever resultado, não comitar, etc).
+- Strict TypeScript; narrow `unknown` rather than adding `any`.
+- Relative ESM imports include `.js` suffix.
+- Preserve stale-context and lifecycle generation guards across awaits.
+- Never alter daemon supervisor singleton semantics when changing extension connection lifecycle.

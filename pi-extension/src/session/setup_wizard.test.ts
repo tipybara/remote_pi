@@ -83,7 +83,7 @@ describe("runSetupWizard (2 prompts + confirm)", () => {
       "Agent name: (default: default-name)",
     ]);
     expect(ui.selectCalls.map((c) => c.title)).toEqual([
-      "Use the relay on this terminal to connect to the remote mesh (mobile + PCs)?",
+      "Start the mobile Relay automatically for future Pi sessions?",
       "Save and activate?",
     ]);
   });
@@ -133,8 +133,8 @@ describe("runSetupWizard (2 prompts + confirm)", () => {
     // The relay-context notify must appear in the notify log.
     expect(
       ui.notifies.some((n) =>
-        n.msg.includes("relay forwards encrypted messages") ||
-        n.msg.includes("Remote Pi mobile app"),
+        n.msg.includes("mobile Relay connection") ||
+        n.msg.includes("/remote-pi"),
       ),
     ).toBe(true);
     // No daemon-context notify — daemon mode was removed from the wizard.
@@ -209,9 +209,8 @@ describe("localConfig integration with the wizard", () => {
   });
 
   test("legacy config with session_name field is silently dropped on load", () => {
-    // Pre-refactor configs carried session_name. After the surface cleanup,
-    // local UDS mesh is always a single fixed session — the field has no
-    // meaning. Load should ignore it without error and not persist it back.
+    // Pre-refactor configs carried session_name. Current room identity uses
+    // cwd + Pi session display name, so legacy field is ignored.
     const cwd = tmpCwd();
     const cfgPath = join(cwd, ".pi", "remote-pi", "config.json");
     const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
@@ -233,8 +232,6 @@ describe("localConfig integration with the wizard", () => {
 });
 
 describe("defaultAgentName", () => {
-  // plan/38 decision D: the name is the LEAF only — the cwd now travels as its
-  // own address axis, so the old `parent/folder` prefix is gone.
   test("returns the leaf (basename) of the cwd", () => {
     expect(defaultAgentName("/Users/jacob/Projects/remote_pi")).toBe("remote_pi");
     expect(defaultAgentName("/home/dev/myapp/backend")).toBe("backend");

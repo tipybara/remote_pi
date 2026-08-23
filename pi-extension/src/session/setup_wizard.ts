@@ -28,18 +28,14 @@ const CANCEL_TOKEN = "__cancel__";
  * null when the user cancels any prompt.
  *
  * Prompts:
- *   1. Agent name (default: parent/folder of cwd)
- *   2. Use the relay on this terminal? (yes/no) — gates connection to the
- *      remote mesh (mobile devices + other PCs over the relay). "No" means
- *      local-only: this Pi joins the UDS mesh but doesn't open WSS.
+ *   1. Agent name fallback (Pi session display name remains authoritative)
+ *   2. Start Relay automatically for future Pi sessions? Manual `/remote-pi`
+ *      always starts Relay regardless of this setting.
  *   Final: review + confirm "Save and activate?" yes/no
  *
  * Daemon mode (run agents 24/7 via systemd/launchd) is intentionally NOT in
  * the wizard — it's an explicit, separate opt-in via `/remote-pi install`.
  *
- * The local UDS mesh is always single per machine ("local" session) — no
- * session question. All Pis on the same machine see each other through
- * the same broker.
  */
 export async function runSetupWizard(
   ui: WizardUI,
@@ -53,11 +49,11 @@ export async function runSetupWizard(
   if (agent_name === null) return null;
 
   ui.notify?.(
-    "The relay forwards encrypted messages to the Remote Pi mobile app and other PCs in your mesh. Skip this if you only want a local-only mesh on this machine.",
+    "Remote Pi can start its mobile Relay connection automatically when this Pi session starts. You can always connect manually with /remote-pi.",
     "info",
   );
   const useRelayChoice = await ui.select(
-    "Use the relay on this terminal to connect to the remote mesh (mobile + PCs)?",
+    "Start the mobile Relay automatically for future Pi sessions?",
     defaults.use_relay ? [YES, NO] : [NO, YES],
   );
   if (!useRelayChoice) return null;
@@ -66,7 +62,7 @@ export async function runSetupWizard(
   // Review + confirm
   const summary = [
     `  Agent name:    ${agent_name}`,
-    `  Use relay:     ${auto_start_relay ? YES : NO}`,
+    `  Auto-start:    ${auto_start_relay ? YES : NO}`,
   ].join("\n");
   ui.notify?.(`Summary:\n${summary}`, "info");
 

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import { generateEd25519Keypair, ed25519Sign } from "../pairing/crypto.js";
-import { canonicalBytes } from "./canonical.js";
 import { verifyEnvelope } from "./verify.js";
 import type { MeshEnvelope } from "./types.js";
 
@@ -15,6 +14,8 @@ const PI_TWO_BYTES = Uint8Array.from(
 const PI_ONE_STANDARD = Buffer.from(PI_ONE_BYTES).toString("base64");
 const PI_TWO_STANDARD = Buffer.from(PI_TWO_BYTES).toString("base64");
 const PI_TWO_URL_SAFE = Buffer.from(PI_TWO_BYTES).toString("base64url");
+const canonicalBytes = (value: unknown): Uint8Array =>
+  new TextEncoder().encode(JSON.stringify(value));
 
 /** Builds a signed envelope from a logical header object for test use. */
 function makeSignedEnvelope(

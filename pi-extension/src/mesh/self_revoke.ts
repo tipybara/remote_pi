@@ -10,11 +10,6 @@ import {
   encodeEd25519PublicKey,
   publicKeyFingerprint,
 } from "./encoding.js";
-import {
-  buildTopologySnapshot,
-  type BoundOwnerMembership,
-  type MeshTopologySnapshot,
-} from "./siblings.js";
 import { verifyEnvelope } from "./verify.js";
 
 export interface SelfRevokeStorageSnapshotRecord {
@@ -49,9 +44,6 @@ export interface SelfRevokeOptions {
   ) => void | Promise<void>;
   onAuthoritativeOwners?: (
     canonicalOwnerPubkeys: readonly string[],
-  ) => void | Promise<void>;
-  onTopologyChanged?: (
-    snapshot: MeshTopologySnapshot,
   ) => void | Promise<void>;
   log?: {
     info(msg: string): void;
@@ -103,26 +95,6 @@ function rawOwnerFingerprint(rawOwner: unknown): string {
     .slice(0, 8);
 }
 
-function topologyEquals(
-  left: MeshTopologySnapshot | null,
-  right: MeshTopologySnapshot,
-): boolean {
-  if (!left) return false;
-  if (
-    left.self.pcPubkey !== right.self.pcPubkey ||
-    left.self.pcLabel !== right.self.pcLabel ||
-    left.self.legacyPcLabel !== right.self.legacyPcLabel ||
-    left.siblings.length !== right.siblings.length
-  ) return false;
-  return left.siblings.every((identity, index) => {
-    const other = right.siblings[index];
-    return other !== undefined &&
-      identity.pcPubkey === other.pcPubkey &&
-      identity.pcLabel === other.pcLabel &&
-      identity.legacyPcLabel === other.legacyPcLabel;
-  });
-}
-
 export class SelfRevoke {
   private readonly client: MeshClient;
   private readonly storage: SelfRevokeStorage;
@@ -130,7 +102,6 @@ export class SelfRevoke {
   private readonly intervalMs: number;
   private readonly onRevoke?: SelfRevokeOptions["onRevoke"];
   private readonly onAuthoritativeOwners?: SelfRevokeOptions["onAuthoritativeOwners"];
-  private readonly onTopologyChanged?: SelfRevokeOptions["onTopologyChanged"];
   private readonly log: NonNullable<SelfRevokeOptions["log"]>;
   /**
    * Accepted anti-rollback floor, deliberately independent from pending I/O.
@@ -139,8 +110,6 @@ export class SelfRevoke {
    */
   private readonly lastSeenVersion = new Map<string, number>();
   private readonly pendingRevocations = new Map<string, PendingRevocation>();
-  private readonly membershipByOwner = new Map<string, BoundOwnerMembership>();
-  private previousTopology: MeshTopologySnapshot | null = null;
   private sweepInFlight: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   /** Invalidates authority held by an async sweep when this producer stops/re-pairs. */
@@ -154,7 +123,6 @@ export class SelfRevoke {
     this.intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
     this.onRevoke = opts.onRevoke;
     this.onAuthoritativeOwners = opts.onAuthoritativeOwners;
-    this.onTopologyChanged = opts.onTopologyChanged;
     this.log = opts.log ?? {
       info: (message) => console.info(message),
       warn: (message) => console.warn(message),
@@ -207,7 +175,6 @@ export class SelfRevoke {
     } catch {
       if (!this._hasAuthority(generation)) return;
       this.log.error("[mesh] event=owner_list_unavailable");
-      await this._publishTopology(buildTopologySnapshot(this.myPubkey, this.membershipByOwner.values()), generation);
       return;
     }
     if (!this._hasAuthority(generation)) return;
@@ -232,10 +199,6 @@ export class SelfRevoke {
       const staleResponse = await this._checkOwnerSlot(slot, generation);
       if (!this._hasAuthority(generation) || staleResponse) return;
     }
-    await this._publishTopology(
-      buildTopologySnapshot(this.myPubkey, this.membershipByOwner.values()),
-      generation,
-    );
   }
 
   private _hasAuthority(generation: number): boolean {
@@ -301,11 +264,6 @@ export class SelfRevoke {
         this.pendingRevocations.delete(owner);
       }
     }
-    for (const owner of this.membershipByOwner.keys()) {
-      if (!currentOwners.has(owner) && !this.pendingRevocations.has(owner)) {
-        this.membershipByOwner.delete(owner);
-      }
-    }
     for (const owner of this.lastSeenVersion.keys()) {
       if (!currentOwners.has(owner) && !this.pendingRevocations.has(owner)) {
         this.lastSeenVersion.delete(owner);
@@ -327,7 +285,6 @@ export class SelfRevoke {
         this.log.warn(`[mesh] event=owner_fetch_unavailable owner_fp=${slot.fingerprint}`);
         return false;
       }
-      this.membershipByOwner.delete(slot.canonicalOwnerPubkey);
       const event = error instanceof MeshFetchInvalidResponseError ? "owner_fetch_invalid" : "owner_fetch_failed";
       this.log.warn(`[mesh] event=${event} owner_fp=${slot.fingerprint}`);
       return false;
@@ -340,13 +297,11 @@ export class SelfRevoke {
       header = await verifyEnvelope(envelope);
     } catch {
       if (!this._hasAuthority(generation)) return false;
-      this.membershipByOwner.delete(slot.canonicalOwnerPubkey);
       this.log.warn(`[mesh] event=owner_envelope_invalid owner_fp=${slot.fingerprint}`);
       return this._retryPending(slot, generation);
     }
     if (!this._hasAuthority(generation)) return false;
     if (!bytesEqual(header.ownerPk, slot.ownerPk)) {
-      this.membershipByOwner.delete(slot.canonicalOwnerPubkey);
       this.log.warn(`[mesh] event=owner_slot_mismatch owner_fp=${slot.fingerprint}`);
       return this._retryPending(slot, generation);
     }
@@ -359,28 +314,19 @@ export class SelfRevoke {
       return this._retryPending(slot, generation);
     }
 
-    const membership: BoundOwnerMembership = {
-      ownerPubkey: encodeEd25519PublicKey(header.ownerPk),
-      members: header.members.map((member) => ({
-        pcPubkey: member.remoteEpk,
-        ...(member.nickname !== undefined ? { nickname: member.nickname } : {}),
-      })),
-    };
     const selfPubkey = encodeEd25519PublicKey(this.myPubkey);
-    const stillMember = membership.members.some((member) => member.pcPubkey === selfPubkey);
+    const stillMember = header.members.some((member) => member.remoteEpk === selfPubkey);
     if (!this._hasAuthority(generation)) return false;
 
     if (stillMember) {
       // A newer self-including envelope supersedes any older pending revoke.
       this.pendingRevocations.delete(slot.canonicalOwnerPubkey);
       this.lastSeenVersion.set(slot.canonicalOwnerPubkey, header.version);
-      this.membershipByOwner.set(slot.canonicalOwnerPubkey, membership);
       return false;
     }
 
     const previousVersion = this.lastSeenVersion.get(slot.canonicalOwnerPubkey);
     this.lastSeenVersion.set(slot.canonicalOwnerPubkey, header.version);
-    this.membershipByOwner.delete(slot.canonicalOwnerPubkey);
     this.pendingRevocations.set(slot.canonicalOwnerPubkey, {
       version: header.version,
       previousVersion,
@@ -473,19 +419,5 @@ export class SelfRevoke {
         this.log.error(`[mesh] event=owner_revoke_callback_failed owner_fp=${fingerprint}`);
       }
     }
-  }
-
-  private async _publishTopology(next: MeshTopologySnapshot, generation: number): Promise<void> {
-    if (!this._hasAuthority(generation) || topologyEquals(this.previousTopology, next)) return;
-    try {
-      if (this.onTopologyChanged) {
-        if (!this._hasAuthority(generation)) return;
-        await this.onTopologyChanged(next);
-      }
-    } catch {
-      if (this._hasAuthority(generation)) this.log.error("[mesh] event=topology_callback_failed");
-      return;
-    }
-    if (this._hasAuthority(generation)) this.previousTopology = next;
   }
 }

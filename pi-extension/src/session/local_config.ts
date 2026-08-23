@@ -15,35 +15,17 @@ const DIRECT_CONFIG_ENV = "REMOTE_PI_DIRECT_CONFIG";
 
 export interface LocalConfig {
   agent_name?: string;
-  /**
-   * If true (default), `/remote-pi` with no args auto-joins the local UDS
-   * mesh and starts the relay on a fresh terminal. The field name is
-   * historical (plano 21); the UX wording was reworked to "use the relay
-   * on this terminal to connect to the remote mesh (mobile + PCs)". Legacy
-   * configs without this field are treated as `true` for backward compat.
-   */
+  /** If true (default), start mobile Relay on session startup. Manual
+   * `/remote-pi` always starts Relay. Missing field remains true for compat. */
   auto_start_relay?: boolean;
-  // `workspace?`/`worktree?` were removed (plan/38, reescrito 2026-06-08): the
-  // mesh identity is `(cwd, nome)`, with `cwd` subsuming folder + worktree
-  // disambiguation. Neither axis is derived anymore, so the config fields are
-  // gone. Any stale `workspace`/`worktree` key in an on-disk/inline config is
-  // simply ignored on read (parseLocalConfig surfaces only known fields).
+  // Stale `workspace`/`worktree` keys are ignored on read.
 }
 
 function pathFor(cwd: string): string {
   return join(cwd, LOCAL_DIR, LOCAL_FILE);
 }
 
-/**
- * Normalize a name segment to a mesh-safe token: trim, replace the addressing
- * separators (`/ : @ #`) and whitespace runs with `-`, collapse repeats, strip
- * edges. The `@` is included so a sanitized name can never contain the address
- * separator — `<cwd>@<name>` stays unambiguous on the wire. Returns undefined
- * when the input isn't a usable non-empty string, sanitizes to empty, or is a
- * reserved addressing keyword (`broadcast` / `broker`). Used by the broker's
- * `sanitizeMeshName` to keep the `<nome>` half of a peer address safe to
- * compose (plan/38).
- */
+/** Legacy agent-name sanitizer retained for config compatibility. */
 export function sanitizeSegment(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const token = v.trim().replace(/[/:@#\s]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "");
@@ -75,10 +57,7 @@ export function migrateAgentName(raw: string): string | undefined {
 }
 
 /**
- * Parse a raw JSON string into a LocalConfig, surfacing only known fields.
- * Returns null when the input isn't a usable JSON object. Legacy `session_name`
- * from pre-refactor configs is silently dropped — the local UDS mesh is now
- * always a single fixed session, so the field has no meaning.
+ * Parse raw JSON into known LocalConfig fields. Legacy `session_name` is ignored.
  */
 function parseLocalConfig(raw: string): LocalConfig | null {
   let parsed: unknown;
@@ -156,12 +135,7 @@ export function saveLocalConfig(cwd: string, patch: Partial<LocalConfig>): void 
 }
 
 /**
- * Default agent name when none is configured (plan/38 decision D): the **leaf**
- * of the cwd, `basename(cwd)`. The cwd now travels as its own address axis
- * (`<cwd>@<nome>`), so the name no longer needs the `parent/folder` prefix that
- * used to disambiguate folders — the broker keys peers by `(cwd, nome)`, and a
- * clean leaf means `#N` almost never fires. Falls back to `"agent"` for a
- * path with no usable basename (root / empty).
+ * Default display-name fallback: cwd basename, or `agent` at filesystem root.
  */
 export function defaultAgentName(cwd: string): string {
   return basename(cwd) || "agent";
