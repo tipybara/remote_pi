@@ -26,15 +26,11 @@ export function roomIdForCwd(cwd: string): string {
  * `(cwd, name)` so several agents in the SAME folder get distinct rooms (the
  * app then renders one tile per agent instead of merging them into one).
  *
- * Default-preserving: when `name` is absent OR equals `defaultAgentName(cwd)`
- * (an agent with no custom `agent_name`), it returns the LEGACY `roomIdForCwd`
- * EXACTLY — so a single unnamed agent's existing conversation is NOT re-keyed
- * on upgrade. A custom or `#N`-suffixed name → a name-scoped id (same formula
- * the cwd-lock uses).
- *
- * Using the ASSIGNED leaf name (the broker's `#N` on collision) disambiguates
- * even two unnamed agents: the 1st stays `folder` (== default → legacy room),
- * the 2nd becomes `folder#2` (≠ default → name-scoped room).
+ * Default-preserving: when `name` is absent OR equals `defaultAgentName(cwd)`,
+ * it returns the legacy cwd-only id exactly, so an existing default room is not
+ * re-keyed on upgrade. Any other Pi session display name gets a name-scoped id.
+ * Two simultaneous processes cannot own the same room id; users distinguish
+ * same-folder sessions with `/name`.
  *
  * INVARIANT: every callsite that derives the App↔Pi room for the same agent
  * MUST go through this function — otherwise the app would pair on a room the
@@ -48,8 +44,8 @@ export function roomIdFor(cwd: string, name?: string): string {
   } catch {
     target = cwd;
   }
-  // NUL separator (U+0000): impossible in a POSIX path and stripped from any
-  // sanitized name, so the cwd/name boundary is unambiguous.
+  // NUL is impossible in a filesystem path or Pi session name, making the
+  // cwd/name boundary unambiguous.
   const sep = String.fromCharCode(0);
   return createHash("sha256").update(target + sep + name).digest("base64url").slice(0, 12);
 }

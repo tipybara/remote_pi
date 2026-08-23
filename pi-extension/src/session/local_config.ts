@@ -14,6 +14,8 @@ const LOCAL_FILE = "config.json";
 const DIRECT_CONFIG_ENV = "REMOTE_PI_DIRECT_CONFIG";
 
 export interface LocalConfig {
+  /** Stable daemon name and legacy compatibility. Interactive room identity
+   * comes from the Pi session display name (`/name`). */
   agent_name?: string;
   /** If true (default), start mobile Relay on session startup. Manual
    * `/remote-pi` always starts Relay. Missing field remains true for compat. */
@@ -25,7 +27,7 @@ function pathFor(cwd: string): string {
   return join(cwd, LOCAL_DIR, LOCAL_FILE);
 }
 
-/** Legacy agent-name sanitizer retained for config compatibility. */
+/** Legacy daemon-name sanitizer retained for config compatibility. */
 export function sanitizeSegment(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const token = v.trim().replace(/[/:@#\s]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "");
@@ -35,7 +37,7 @@ export function sanitizeSegment(v: unknown): string | undefined {
 }
 
 /**
- * Migrate a persisted `agent_name` to the plan/38 leaf-name model (decision E).
+ * Normalize a persisted legacy/daemon `agent_name` to a clean leaf name.
  * Two legacy shapes get rewritten on read so a pre-fix config never fossilizes a
  * runtime accident as if it were an explicit choice:
  *

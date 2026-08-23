@@ -1083,8 +1083,8 @@ let _relayLifecycleGeneration = 0;
 // those generations. Stop/off/session replacement advance this separate epoch
 // so a queued root can never regain authority by creating a newer child.
 let _rootLifecycleGeneration = 0;
-// Coalesces concurrent `/remote-pi` startup paths inside ONE extension instance.
-// Separate Pi processes still keep the existing #N behavior via the cwd lock.
+// Coalesces concurrent `/remote-pi` startup paths inside one extension instance.
+// The Relay rejects a second live connection that announces the same room id.
 let _cmdRootInFlight: Promise<void> | null = null;
 
 type RootRestartAuthority = Readonly<{
@@ -2524,11 +2524,7 @@ async function _cmdRootInner(
       _cmdStatus(ctx);
       return;
     }
-    const baseDefault = defaultAgentName(cwd);
-    const newConfig = await runSetupWizard(ui, {
-      agent_name: baseDefault,
-      use_relay: true,
-    });
+    const newConfig = await runSetupWizard(ui, { use_relay: true });
     if (!_isCurrentRootLifecycle(rootLifecycleGeneration)) return;
     if (!newConfig) {
       ctx.ui.notify("[remote-pi] Setup cancelled.", "info");
@@ -2559,9 +2555,7 @@ async function _cmdSetup(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
     return;
   }
   const current = loadLocalConfig(cwd);
-  const baseDefault = defaultAgentName(cwd);
   const newConfig = await runSetupWizard(ui, {
-    agent_name: current.agent_name ?? baseDefault,
     use_relay: effectiveAutoStartRelay(current),
   });
   if (!newConfig) {
@@ -2750,7 +2744,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
     if (!isCurrentCandidate()) return;
     if (err instanceof RoomAlreadyOpenError) {
       notify(
-        "[remote-pi] Already running in this cwd. Stop the other terminal first.",
+        `[remote-pi] Relay room "${sessionName}" is already open for this project. Stop the Pi process that owns that room or choose a different session name with /name.`,
         "error",
       );
       return;

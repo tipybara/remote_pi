@@ -3269,7 +3269,7 @@ describe("rooms wiring", () => {
     await _connectForTest(ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Already running in this cwd"),
+      expect.stringMatching(/Relay room .* already open .*\/name/),
       "error",
     );
     expect(relayRef.current?.close).toHaveBeenCalledTimes(1);
