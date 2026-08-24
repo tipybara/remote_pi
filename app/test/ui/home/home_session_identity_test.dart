@@ -397,6 +397,7 @@ void main() {
   _phase1();
   _phase2();
   _grouping();
+  _pathRendering();
 
   group('Home tiles carry a stable ValueKey (plan-61 fase 0)', () {
     Future<HomeViewModel> pumpHome(
@@ -1090,6 +1091,40 @@ void _grouping() {
         final rows = list.copyWith(grouping: g).groups().expand((d) => d.sessions);
         expect(rows.map((i) => i.room.roomId).toList(), ['s1', 's2']);
       }
+    });
+  });
+}
+
+// ── workspace path rendering ───────────────────────────────────────────────
+
+void _pathRendering() {
+  group('headTruncatedPath', () {
+    test('a short path is shown in full, slashes intact', () {
+      // The regression this guards: the header used to render the path with
+      // `textDirection: TextDirection.rtl` to cut the head. `/` is a
+      // direction-neutral character, so RTL reordered the LEADING slash to the
+      // visual end — `/Users/jacob/proj/api` displayed as
+      // `Users/jacob/proj/api/`. The path was simply wrong on screen.
+      expect(headTruncatedPath('/Users/jacob/proj/api'), '/Users/jacob/proj/api');
+      expect(headTruncatedPath('/w/api'), '/w/api');
+      expect(headTruncatedPath('/'), '/');
+    });
+
+    test('a long path loses its HEAD, not its tail', () {
+      // The tail disambiguates; cutting it (a plain ellipsis overflow) would
+      // leave every deep path looking identical.
+      const long = '/Users/jacob/Documents/Warehouse/clients/acme/backend/api';
+      final out = headTruncatedPath(long, budget: 20);
+      expect(out.length, 20);
+      expect(out.startsWith('…'), isTrue);
+      expect(out.endsWith('backend/api'), isTrue);
+      expect(long.endsWith(out.substring(1)), isTrue);
+    });
+
+    test('a path exactly at the budget is not truncated', () {
+      final exact = 'x' * 20;
+      expect(headTruncatedPath(exact, budget: 20), exact);
+      expect(headTruncatedPath('${exact}y', budget: 20).startsWith('…'), isTrue);
     });
   });
 }

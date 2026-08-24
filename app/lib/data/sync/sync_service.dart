@@ -17,6 +17,7 @@ import 'package:app/data/local/records/message_record.dart';
 import 'package:app/data/local/records/runtime_record.dart';
 import 'package:app/data/local/records/session_index_record.dart';
 import 'package:app/data/sync/sync_events.dart';
+import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/contracts/service.dart';
 import 'package:app/domain/session_state.dart';
@@ -32,6 +33,8 @@ class SyncService extends Service {
   StreamSubscription<ServerMessage>? _msgSub;
   StreamSubscription<Map<String, List<RoomInfo>>>? _roomsSub;
   StreamSubscription<Map<String, PresenceState>>? _presenceSub;
+  StreamSubscription<({String epk, String roomId, String reason})>?
+      _transportErrorSub;
 
   // Active session being written (follows ConnectionManager).
   String? _activeEpk;
@@ -104,6 +107,12 @@ class SyncService extends Service {
       _syncTurnStateFromRoomMeta();
     });
     _presenceSub = _conn.presenceStream.listen((_) => _writeRuntime());
+    // Plan 61 Phase 3 follow-up — consume the relay's undeliverable-destination
+    // report. Without this subscriber the frame was parsed, greyed the tile,
+    // and then went nowhere: pending bubbles still sat out the full no-echo
+    // window even though the relay had already said, definitively, that nobody
+    // was there to receive them.
+    _transportErrorSub = _conn.transportErrors.listen(_onTransportError);
     _onStatus(_conn.status); // replay current
   }
 
@@ -269,6 +278,38 @@ class SyncService extends Service {
       '[msg-timeout] id=$id removed (no echo in '
       '${pendingSendTimeout.inSeconds}s)',
     );
+  }
+
+  /// The relay could not deliver to `(epk, roomId)`.
+  ///
+  /// This is stronger information than a timeout: a timeout means "no echo
+  /// yet", while this means "there was no live connection at the destination".
+  /// Every optimistic row still waiting on an echo for THIS session is
+  /// therefore already known to be undeliverable, so reap them now instead of
+  /// letting each one burn the rest of its window.
+  ///
+  /// Scoped to the active session on purpose. The error names a `(peer, room)`
+  /// — the outer envelope carries no message id and `ct` is opaque, so the
+  /// relay cannot correlate to a single frame — and rows belonging to some
+  /// other session must not be touched.
+  void _onTransportError(({String epk, String roomId, String reason}) e) {
+    final epk = _activeEpk;
+    if (epk == null) return;
+    // The stream is keyed in standard base64 (ConnectionManager normalises on
+    // ingest); `_activeEpk` comes from prefs and is url-safe. Compare
+    // normalised — this is the recurring encoding trap, see epk_encoding.dart.
+    if (toStandardB64(epk) != toStandardB64(e.epk)) return;
+    if (_activeRoomId != e.roomId) return;
+    final doomed = _pendingSendTimers.keys.toList();
+    if (doomed.isEmpty) return;
+    debugPrint(
+      '[transport-error] ${e.reason} for room=${e.roomId}; '
+      'reaping ${doomed.length} pending row(s)',
+    );
+    for (final id in doomed) {
+      _pendingSendTimers.remove(id)?.cancel();
+      _onSendTimeout(id);
+    }
   }
 
   void _cancelAllSendTimers() {
@@ -1175,6 +1216,7 @@ class SyncService extends Service {
     _msgSub?.cancel();
     _roomsSub?.cancel();
     _presenceSub?.cancel();
+    _transportErrorSub?.cancel();
     _streamingController.close();
     _eventController.close();
     _extensionUiController.close();

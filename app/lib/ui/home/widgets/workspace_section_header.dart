@@ -13,6 +13,29 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 /// The folder NAME is shown, with the full path as a dimmed second line when it
 /// adds information. Both are display-only: the workspace is a grouping key,
 /// never an identity (plan 61 target model), so nothing here is tappable.
+/// Longest path rendered in full. Beyond this the HEAD is dropped.
+///
+/// A character budget is exact here because the path is drawn in
+/// [kMonoFamily] — every glyph is the same width.
+const int _kPathBudget = 42;
+
+/// Shorten a path from the FRONT, keeping the tail.
+///
+/// The tail is the part that disambiguates (`…/proj/api` tells you more than
+/// `/Users/jacob/pr…`), so a plain `TextOverflow.ellipsis` — which drops the
+/// tail — is the wrong end to cut.
+///
+/// This used to be done with `textDirection: TextDirection.rtl`, which was a
+/// real bug: `/` is a direction-neutral character, so under RTL the LEADING
+/// slash was reordered to the visual end and `/Users/jacob/proj/api` rendered
+/// as `Users/jacob/proj/api/`. The path was simply displayed wrong. Truncating
+/// explicitly keeps the text LTR and the slashes where they belong.
+String headTruncatedPath(String path, {int budget = _kPathBudget}) {
+  if (path.length <= budget) return path;
+  // Reserve one column for the ellipsis itself.
+  return '…${path.substring(path.length - (budget - 1))}';
+}
+
 class WorkspaceSectionHeader extends StatelessWidget {
   final HomeWorkspace workspace;
 
@@ -59,13 +82,9 @@ class WorkspaceSectionHeader extends StatelessWidget {
                 ),
                 if (showPath)
                   Text(
-                    path,
+                    headTruncatedPath(path),
                     maxLines: 1,
-                    // Long absolute paths are more useful truncated at the
-                    // START — the tail (the folder you are in) is the part
-                    // that disambiguates.
                     overflow: TextOverflow.ellipsis,
-                    textDirection: TextDirection.rtl,
                     style: TextStyle(
                       fontFamily: kMonoFamily,
                       fontSize: 10,

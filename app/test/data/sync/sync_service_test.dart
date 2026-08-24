@@ -822,6 +822,94 @@ void main() {
     },
   );
 
+  // Plan 61 Phase 3 follow-up — the relay can tell us the destination was not
+  // there at all. That is strictly stronger than "no echo yet", so the pending
+  // rows must be reaped NOW rather than each burning the rest of its window.
+  //
+  // This closes a real gap: the frame was already parsed and already greyed the
+  // Home tile, but `ConnectionManager.transportErrors` had no subscriber, so
+  // nothing acted on it.
+  group('transport_error reaps pending sends', () {
+    // Deliberately long: if the reap is not wired, the test times out on the
+    // no-echo path instead of passing by accident.
+    const long = Duration(seconds: 30);
+
+    test('an undeliverable destination drops the pending bubble immediately',
+        () async {
+      final s = await setup(pendingSendTimeout: long);
+      await s.sync.sendMessage('hello');
+      await _settle();
+      expect(messages(s.epk), hasLength(1));
+      expect(messages(s.epk).first.pending, isTrue);
+      expect(s.sync.debugPendingSendTimerCount, 1);
+
+      s.ch.pushControl(
+        TransportError(peer: s.epk, roomId: 'main', reason: 'offline'),
+      );
+      await _settle();
+
+      expect(
+        messages(s.epk),
+        isEmpty,
+        reason: 'the relay said nobody was there — do not wait 30s to find out',
+      );
+      expect(s.sync.debugPendingSendTimerCount, 0);
+      expect(s.sync.isWorking, isFalse);
+      expect(s.sync.streaming, isNull);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('an error for a DIFFERENT room leaves this session alone', () async {
+      // The error names a (peer, room); rows belonging to another session must
+      // not be collateral.
+      final s = await setup(pendingSendTimeout: long);
+      await s.sync.sendMessage('hello');
+      await _settle();
+      expect(s.sync.debugPendingSendTimerCount, 1);
+
+      s.ch.pushControl(
+        TransportError(peer: s.epk, roomId: 'some-other-room', reason: 'offline'),
+      );
+      await _settle();
+
+      expect(messages(s.epk), hasLength(1), reason: 'still pending');
+      expect(s.sync.debugPendingSendTimerCount, 1);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('an error for a DIFFERENT peer leaves this session alone', () async {
+      final s = await setup(pendingSendTimeout: long);
+      await s.sync.sendMessage('hello');
+      await _settle();
+
+      s.ch.pushControl(
+        const TransportError(peer: 'somebody_else', roomId: 'main', reason: 'offline'),
+      );
+      await _settle();
+
+      expect(messages(s.epk), hasLength(1));
+      expect(s.sync.debugPendingSendTimerCount, 1);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('an error with nothing pending is harmless', () async {
+      final s = await setup(pendingSendTimeout: long);
+      s.ch.pushControl(
+        TransportError(peer: s.epk, roomId: 'main', reason: 'offline'),
+      );
+      await _settle();
+      expect(s.sync.debugPendingSendTimerCount, 0);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+  });
+
   // Plan/32 safety net — a sent message whose echo never comes back must not
   // spin forever; the optimistic bubble is removed SILENTLY after the timeout.
   group('no-echo send timeout', () {
