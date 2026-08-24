@@ -3,6 +3,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:app/ui/core/themes/app_font_scale.dart';
+import 'package:app/ui/home/states/home_state.dart' show HomeGrouping;
 
 /// App-wide UI preferences (persisted across launches).
 ///
@@ -18,6 +19,7 @@ class Preferences extends ChangeNotifier {
   bool _onboardingCompleted = false;
   ThemeMode _themeMode = ThemeMode.system;
   AppFontScale _fontScale = AppFontScale.standard;
+  HomeGrouping _homeGrouping = HomeGrouping.workspace;
 
   Preferences([FlutterSecureStorage? store])
       : _store = store ?? const FlutterSecureStorage();
@@ -28,6 +30,7 @@ class Preferences extends ChangeNotifier {
   static const _kOnboardingCompletedKey = 'prefs.onboarding_completed';
   static const _kThemeModeKey = 'prefs.theme_mode';
   static const _kFontScaleKey = 'prefs.font_scale';
+  static const _kHomeGroupingKey = 'prefs.home_grouping';
 
   /// True → chat hides `ToolEvent` rows (only user/assistant text remain).
   bool get hideToolCalls => _hideToolCalls;
@@ -62,6 +65,22 @@ class Preferences extends ChangeNotifier {
     return r.isEmpty ? null : r;
   }
 
+  /// Plan 61 Phase 2 — the selected SESSION.
+  ///
+  /// Same value as [selectedRoomId], under the name that describes what it
+  /// actually is: since Phase 1 the Pi keys its relay room by the session
+  /// UUID (`room_id == session_id`), so the room half of this pointer IS the
+  /// session id. Reading it through this getter is the intent-revealing form
+  /// and the one new code should use.
+  ///
+  /// Two caveats, both deliberate:
+  ///  * a pre-Phase-1 Pi still keys by `sha256(cwd[,name])`, so this can be a
+  ///    digest rather than a UUID. Callers must treat it as an opaque id.
+  ///  * the epk stays part of the stored pointer. A session id alone cannot
+  ///    open a connection — the app needs to know WHICH machine to dial — so
+  ///    the persisted form remains the composite `epk:session`.
+  String? get selectedSessionId => selectedRoomId;
+
   /// Composite raw value (epk[:room]). Tests can inspect.
   String? get selectedRoomRaw => _selectedPeerEpk;
 
@@ -83,6 +102,11 @@ class Preferences extends ChangeNotifier {
   /// router in `main.dart`, so it scales the whole UI — including the per-widget
   /// `copyWith(fontSize: …)` overrides that a typography-only change would miss.
   AppFontScale get fontScale => _fontScale;
+
+  /// Plan 61 Phase 2 (follow-up) — how deep Home groups its list. Persisted:
+  /// it is a layout preference, and re-picking it on every launch would be
+  /// exactly the kind of state-loss plan 61 is about.
+  HomeGrouping get homeGrouping => _homeGrouping;
 
   /// Hydrate from secure storage. Safe to call multiple times.
   Future<void> load() async {
@@ -126,6 +150,14 @@ class Preferences extends ChangeNotifier {
     final scale = AppFontScale.fromName(await _store.read(key: _kFontScaleKey));
     if (scale != _fontScale) {
       _fontScale = scale;
+      changed = true;
+    }
+
+    final grouping = HomeGrouping.fromWire(
+      await _store.read(key: _kHomeGroupingKey),
+    );
+    if (grouping != _homeGrouping) {
+      _homeGrouping = grouping;
       changed = true;
     }
 
@@ -207,6 +239,15 @@ class Preferences extends ChangeNotifier {
     if (_fontScale == value) return;
     _fontScale = value;
     await _store.write(key: _kFontScaleKey, value: value.name);
+    notifyListeners();
+  }
+
+  /// Persist the Home grouping depth. Stored by its stable `wire` string so
+  /// the value survives enum reordering.
+  Future<void> setHomeGrouping(HomeGrouping value) async {
+    if (_homeGrouping == value) return;
+    _homeGrouping = value;
+    await _store.write(key: _kHomeGroupingKey, value: value.wire);
     notifyListeners();
   }
 

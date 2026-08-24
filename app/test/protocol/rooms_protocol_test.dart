@@ -121,18 +121,46 @@ void main() {
       },
     );
 
-    test('RoomInfo serializes + parses model round-trip', () {
+    test('RoomInfo serializes + parses round-trip (all fields set)', () {
       const r = RoomInfo(
         roomId: 'r1',
         startedAt: 100,
         name: 'work',
         cwd: '/x',
         model: 'claude-sonnet-4.5',
+        // Plan 61 Phase 1 — the session identity must survive the round-trip
+        // too; it is what the cached-rooms store persists across cold starts.
+        sessionId: '019ffb64-7c21-7a3f-9d2e-4b1c8a0f6e5d',
+        workspacePath: '/x',
+        nameRev: 7,
+        role: 'control',
       );
       final back = RoomInfo.fromJson(r.toJson());
       expect(back, r);
       expect(back.model, 'claude-sonnet-4.5');
+      expect(back.sessionId, '019ffb64-7c21-7a3f-9d2e-4b1c8a0f6e5d');
+      expect(back.nameRev, 7);
+      expect(back.isControlRoom, isTrue);
     });
+
+    test(
+      'plan 61 Phase 1 — a legacy room (cwd only, no workspace_path) back-fills '
+      'the workspace from cwd so Home can still group it',
+      () {
+        // Deliberately NOT an identity round-trip: a pre-plan-61 payload has no
+        // `workspace_path`, and leaving it null would hide the session from the
+        // Device → Workspace → Session grouping entirely. `cwd` already holds
+        // the same canonical path, so it is promoted. Re-parsing is stable.
+        const legacy = RoomInfo(roomId: 'r1', startedAt: 100, cwd: '/x');
+        expect(legacy.workspacePath, isNull);
+
+        final back = RoomInfo.fromJson(legacy.toJson());
+        expect(back.workspacePath, '/x');
+        expect(back.sessionId, isNull, reason: 'legacy rooms are not session-keyed');
+        expect(back.isControlRoom, isFalse);
+        expect(RoomInfo.fromJson(back.toJson()), back, reason: 'stable after one pass');
+      },
+    );
 
     test('outbound subscribe_rooms helper has correct shape', () {
       expect(subscribeRoomsFrame(['a', 'b']), {

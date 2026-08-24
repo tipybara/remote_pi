@@ -31,6 +31,16 @@ class SessionTile extends StatelessWidget {
   /// only responds to tap.
   final VoidCallback? onLongPress;
 
+  /// Plan 61 Phase 2 (follow-up) — where this session lives, shown on the tile
+  /// itself.
+  ///
+  /// Only set when Home is rendering WITHOUT the headers that would otherwise
+  /// carry it (grouping `device` hides the folder; grouping `none` hides both
+  /// the machine and the folder). Dropping the headers must not drop the
+  /// attribution — a flat list of eight rows called "app" across three Macs is
+  /// useless.
+  final String? contextLabel;
+
   const SessionTile({
     super.key,
     required this.peer,
@@ -41,6 +51,7 @@ class SessionTile extends StatelessWidget {
     this.isWorking = false,
     this.isSelected = false,
     this.onLongPress,
+    this.contextLabel,
   });
 
   @override
@@ -71,7 +82,11 @@ class SessionTile extends StatelessWidget {
                 _Avatar(name: _avatarName()),
                 const SizedBox(width: 14),
                 Expanded(
-                  child: _TitleBlock(peer: peer, room: room),
+                  child: _TitleBlock(
+                    peer: peer,
+                    room: room,
+                    contextLabel: contextLabel,
+                  ),
                 ),
                 _PresenceDot(
                   isLive: isLive,
@@ -137,7 +152,12 @@ class _PresenceDot extends StatelessWidget {
 class _TitleBlock extends StatelessWidget {
   final PeerRecord peer;
   final RoomInfo? room;
-  const _TitleBlock({required this.peer, required this.room});
+  final String? contextLabel;
+  const _TitleBlock({
+    required this.peer,
+    required this.room,
+    this.contextLabel,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -184,17 +204,61 @@ class _TitleBlock extends StatelessWidget {
         Builder(builder: (_) {
           final model = room?.model;
           final hasModel = model != null && model.isNotEmpty;
-          return Text(
-            hasModel
-                ? _truncateModel(model)
-                : 'Last paired: ${_relativeTime(peer.pairedAt)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: hasModel ? colors.accent : colors.muted,
-              fontSize: 12,
-              fontFamily: kMonoFamily,
-            ),
+          final detail = hasModel
+              ? _truncateModel(model)
+              : 'Last paired: ${_relativeTime(peer.pairedAt)}';
+          final ctx = contextLabel;
+          // One line, not two: the context rides in front of the existing
+          // subtitle so switching grouping never changes the row height (which
+          // would make the whole list jump — the exact failure plan 61 is
+          // about).
+          if (ctx == null || ctx.isEmpty) {
+            return Text(
+              detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: hasModel ? colors.accent : colors.muted,
+                fontSize: 12,
+                fontFamily: kMonoFamily,
+              ),
+            );
+          }
+          return Row(
+            children: [
+              Flexible(
+                child: Text(
+                  ctx,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.muted,
+                    fontSize: 12,
+                    fontFamily: kMonoFamily,
+                  ),
+                ),
+              ),
+              Text(
+                '  ·  ',
+                style: TextStyle(
+                  color: colors.muted,
+                  fontSize: 12,
+                  fontFamily: kMonoFamily,
+                ),
+              ),
+              Flexible(
+                child: Text(
+                  detail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: hasModel ? colors.accent : colors.muted,
+                    fontSize: 12,
+                    fontFamily: kMonoFamily,
+                  ),
+                ),
+              ),
+            ],
           );
         }),
       ],

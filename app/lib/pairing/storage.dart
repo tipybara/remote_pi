@@ -24,6 +24,25 @@ class PersistedRoom {
   /// Persisted so the subtitle survives cold starts.
   final String? model;
 
+  /// Plan 61 Phase 1 — the Pi session UUID this room is keyed by (equal to
+  /// [roomId] for a Phase-1 Pi; `null` for a legacy `sha256(cwd[,name])`
+  /// room). Persisted so a cold start can tell the two generations apart
+  /// before the relay has announced anything.
+  final String? sessionId;
+
+  /// Plan 61 Phase 1 — canonical workspace path. Persisted so Home can render
+  /// its Device → Workspace → Session grouping from cache, offline.
+  final String? workspacePath;
+
+  /// Plan 61 Phase 1 — revision of [name]. Persisted so a stale rename patch
+  /// arriving right after a cold start cannot revert a newer label.
+  final int? nameRev;
+
+  /// Plan 61 Phase 3 — `'control'` for a machine gateway room. Persisted so a
+  /// cached control room is still filtered out of Home before the relay
+  /// re-announces it.
+  final String? role;
+
   const PersistedRoom({
     required this.roomId,
     required this.startedAt,
@@ -31,6 +50,10 @@ class PersistedRoom {
     this.cwd,
     this.localName,
     this.model,
+    this.sessionId,
+    this.workspacePath,
+    this.nameRev,
+    this.role,
   });
 
   Map<String, dynamic> toJson() => {
@@ -40,6 +63,10 @@ class PersistedRoom {
     'started_at': startedAt,
     'local_name': localName,
     'model': model,
+    if (sessionId != null) 'session_id': sessionId,
+    if (workspacePath != null) 'workspace_path': workspacePath,
+    if (nameRev != null) 'name_rev': nameRev,
+    if (role != null) 'role': role,
   };
 
   factory PersistedRoom.fromJson(Map<String, dynamic> j) => PersistedRoom(
@@ -49,6 +76,11 @@ class PersistedRoom {
     startedAt: (j['started_at'] as num).toInt(),
     localName: j['local_name'] as String?,
     model: j['model'] as String?,
+    sessionId: j['session_id'] as String?,
+    // Rooms cached before plan 61 only have `cwd`; it holds the same path.
+    workspacePath: (j['workspace_path'] as String?) ?? (j['cwd'] as String?),
+    nameRev: (j['name_rev'] as num?)?.toInt(),
+    role: j['role'] as String?,
   );
 
   PersistedRoom copyWith({
@@ -57,6 +89,10 @@ class PersistedRoom {
     int? startedAt,
     Object? localName = _unset,
     Object? model = _unset,
+    Object? sessionId = _unset,
+    Object? workspacePath = _unset,
+    Object? nameRev = _unset,
+    Object? role = _unset,
   }) => PersistedRoom(
     roomId: roomId,
     name: name ?? this.name,
@@ -68,6 +104,14 @@ class PersistedRoom {
     model: identical(model, _unset)
         ? this.model
         : model as String?,
+    sessionId: identical(sessionId, _unset)
+        ? this.sessionId
+        : sessionId as String?,
+    workspacePath: identical(workspacePath, _unset)
+        ? this.workspacePath
+        : workspacePath as String?,
+    nameRev: identical(nameRev, _unset) ? this.nameRev : nameRev as int?,
+    role: identical(role, _unset) ? this.role : role as String?,
   );
 }
 
@@ -88,11 +132,20 @@ class PeerRecord {
   // Local-only display label (Pi does not know about this). Renders in
   // place of [sessionName] when set; null = use sessionName everywhere.
   final String? nickname;
-  /// Plan 17 fix — Pi-side room id (cwd-session) this pairing is bound
-  /// to. Set from `PairOk.roomId` on pair, or discovered lazily via
-  /// `subscribe_rooms` for legacy peers persisted before this fix.
-  /// `null` = not yet discovered; outbound sends fall back to 'main'
-  /// while ConnectionManager runs the discovery once.
+  /// Last-opened room **hint** for this machine — NOT connection
+  /// identity.
+  ///
+  /// Plan-61 Fase 0 (was: "the room this pairing is bound to"). A Mac
+  /// runs many Pi sessions; a single field per pairing can never express
+  /// that, and treating it as the connection key is what made a cold
+  /// start reopen the wrong chat. The authoritative selection now lives
+  /// in `Preferences.selectedRoomRaw` (`epk:roomId`) and, at runtime, in
+  /// `ConnectionManager.activeRoomId`.
+  ///
+  /// This field survives only as a fallback for the first connect when
+  /// prefs carry no room (fresh install, legacy value, peer never
+  /// opened). `null` = no hint yet; discovery adopts the first announced
+  /// room.
   final String? roomId;
   /// Plan/27 Wave A — agent harness reported by the PC at pair time.
   /// Surfaced as the "via Pi coding agent" subtitle on the PiCard.
@@ -193,11 +246,14 @@ class PeerRecord {
 
 /// Pairing storage with change notification.
 ///
-/// Mutations to the peer set (`savePeer`, `deletePeer`) and to the
-/// per-peer rooms cache (`saveRooms`, `deleteRooms`) call
+/// Mutations to the peer set (`savePeer`, `deletePeer`, `wipeAll`) call
 /// `notifyListeners()` so any UI watching the storage (HomeViewModel,
 /// SettingsViewModel) can refresh without manual plumbing between
 /// screens. Read methods do not notify.
+///
+/// Plan-61 Fase 0 — [saveRooms] is the one mutation that stays silent:
+/// see its doc comment. Rooms reach the UI through
+/// `ConnectionManager.roomsStream`, not through this notifier.
 class PairingStorage extends ChangeNotifier {
   final FlutterSecureStorage _store;
 
@@ -300,12 +356,23 @@ class PairingStorage extends ChangeNotifier {
   /// Persist the full set of known rooms for a peer. Replaces any
   /// previously stored set. Called on every room-state change in
   /// ConnectionManager so a cold start can reflect the same view.
+  ///
+  /// Plan-61 Fase 0 — deliberately does **not** `notifyListeners()`. This
+  /// is the highest-frequency write in the app (every `room_meta_update`,
+  /// i.e. every turn_start/turn_end of every subscribed room re-persists
+  /// the cache). The only storage listener is `HomeViewModel`, whose
+  /// callback runs a full `_load()` — rebuilding the entire Home list
+  /// from scratch several times per turn. Home already receives the very
+  /// same data reactively through `ConnectionManager.roomsStream`, so the
+  /// notification was pure churn *and* the trigger for the visible
+  /// "sessions jumping" behaviour. Peer mutations (`savePeer` /
+  /// `deletePeer` / `wipeAll`) still notify — those genuinely change the
+  /// peer set Home reads from storage.
   Future<void> saveRooms(String remoteEpk, List<PersistedRoom> rooms) async {
     await _store.write(
       key: _roomsKey(remoteEpk),
       value: jsonEncode(rooms.map((r) => r.toJson()).toList()),
     );
-    notifyListeners();
   }
 
   Future<List<PersistedRoom>> loadRooms(String remoteEpk) async {

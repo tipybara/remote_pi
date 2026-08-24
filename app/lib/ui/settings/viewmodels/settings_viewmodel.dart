@@ -75,7 +75,14 @@ class SettingsViewModel extends ViewModel<SettingsState> {
     await _prefs.setRelayUrl(trimmed);
 
     await _conn.disconnect();
-    _conn.boot(preferredEpk: _prefs.selectedPeerEpk);
+    // Plan-61 Fase 0 — carry the room half across the relay-URL change.
+    // Reconnecting with the epk alone dropped the user back onto
+    // `PeerRecord.roomId ?? 'main'`, i.e. a different chat than the one
+    // they were reading when they opened Settings.
+    _conn.boot(
+      preferredEpk: _prefs.selectedPeerEpk,
+      preferredRoomId: _prefs.selectedRoomId,
+    );
     return null;
   }
 
@@ -110,8 +117,18 @@ class SettingsViewModel extends ViewModel<SettingsState> {
     if (wasActive) {
       await _conn.disconnect();
       if (remaining.isNotEmpty) {
-        final fallback = remaining.first;
-        await _prefs.setSelectedPeerEpk(fallback.remoteEpk);
+        // Plan-61 Fase 0 — deterministic fallback (same ordering rule as
+        // Home / boot); `listPeers()` is an unordered map read, so
+        // `remaining.first` varied between runs. The room pointer is
+        // deliberately cleared: it belonged to the peer just revoked.
+        final ordered = [...remaining]
+          ..sort((a, b) {
+            final byPairedAt = a.pairedAt.compareTo(b.pairedAt);
+            if (byPairedAt != 0) return byPairedAt;
+            return a.remoteEpk.compareTo(b.remoteEpk);
+          });
+        final fallback = ordered.first;
+        await _prefs.setSelectedRoom(epk: fallback.remoteEpk);
         // ignore: unawaited_futures
         _conn.boot(preferredEpk: fallback.remoteEpk);
       }

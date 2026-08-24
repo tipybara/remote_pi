@@ -62,6 +62,26 @@ class _FakeActionsRepository implements IActionsRepository {
     if (setThinkingError != null) throw setThinkingError!;
   }
 
+  /// Plan 61 Phase 2 — records the last rename request so a test can assert
+  /// what Home actually sent. Quick Actions never renames, so the fake only
+  /// needs to satisfy the interface here.
+  ({String roomId, String displayName, String? sessionId, int? rev})? lastRename;
+
+  @override
+  Future<void> renameSession({
+    required String roomId,
+    required String displayName,
+    String? sessionId,
+    int? rev,
+  }) async {
+    lastRename = (
+      roomId: roomId,
+      displayName: displayName,
+      sessionId: sessionId,
+      rev: rev,
+    );
+  }
+
   @override
   Future<ModelsCatalogue> listModels({bool forceRefresh = false}) async {
     forceRefreshAsked = forceRefresh;

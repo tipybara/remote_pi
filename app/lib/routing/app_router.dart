@@ -2,6 +2,7 @@ import 'package:app/config/dependencies.dart';
 import 'package:app/data/mesh/mesh_sync_service.dart';
 import 'package:app/data/preferences/preferences.dart';
 import 'package:app/data/transport/connection_manager.dart';
+import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/pairing/owner_identity_bridge.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/routing/adaptive.dart';
@@ -101,22 +102,47 @@ class _BootState extends ChangeNotifier {
     _onboarded = prefs.onboardingCompleted;
     _ready = true;
     notifyListeners();
-    // Plano 13: `Preferences.selectedPeerEpk` is the authoritative
-    // pointer to the peer the user wants connected. On a fresh install
-    // it's null — default to `peers.first` so subsequent boot()s have a
-    // stable target and the user lands on a deterministic chat.
+    // Plano 13: `Preferences.selectedRoomRaw` (`epk:roomId`) is the
+    // authoritative pointer to the session the user wants connected.
+    //
+    // Plan-61 Fase 0 — restore BOTH halves. Boot used to read only
+    // `selectedPeerEpk`, silently dropping `:roomId`; `ConnectionManager`
+    // then fell back to `PeerRecord.roomId ?? 'main'`, which is a
+    // per-machine value, so a cold start reopened whatever room the
+    // pairing happened to carry instead of the chat the user last had
+    // open. Epks are compared NORMALISED because different screens have
+    // historically written url-safe and standard base64 into the same key.
     if (_hasPeer) {
-      var selected = prefs.selectedPeerEpk;
-      if (selected == null) {
-        selected = peers.first.remoteEpk;
-        await prefs.setSelectedPeerEpk(selected);
-      } else if (!peers.any((p) => p.remoteEpk == selected)) {
-        // Selected peer was revoked / no longer in storage — fall back.
-        selected = peers.first.remoteEpk;
-        await prefs.setSelectedPeerEpk(selected);
+      // Deterministic fallback order — `listPeers()` reads an unordered
+      // secure-storage map, so `peers.first` is whatever the platform
+      // enumerated first that run. Same ordering rule as Home.
+      final ordered = [...peers]
+        ..sort((a, b) {
+          final byPairedAt = a.pairedAt.compareTo(b.pairedAt);
+          if (byPairedAt != 0) return byPairedAt;
+          return a.remoteEpk.compareTo(b.remoteEpk);
+        });
+      final selectedEpk = prefs.selectedPeerEpk;
+      var room = prefs.selectedRoomId;
+      PeerRecord? match;
+      if (selectedEpk != null) {
+        final want = toStandardB64(selectedEpk);
+        for (final p in ordered) {
+          if (toStandardB64(p.remoteEpk) == want) {
+            match = p;
+            break;
+          }
+        }
+      }
+      if (match == null) {
+        // Nothing selected yet, or the selected peer was revoked. Fall
+        // back — and drop the room, which belonged to a peer that is gone.
+        match = ordered.first;
+        room = null;
+        await prefs.setSelectedRoom(epk: match.remoteEpk);
       }
       // ignore: unawaited_futures
-      conn.boot(preferredEpk: selected);
+      conn.boot(preferredEpk: match.remoteEpk, preferredRoomId: room);
     }
   }
 
@@ -394,7 +420,11 @@ class _DetailPane extends StatelessWidget {
       return const DetailPlaceholder();
     }
     return MultiProvider(
-      key: ValueKey('chat-${sel.current!.epk}-${sel.current!.roomId}'),
+      // Plan-61 Fase 0 — key on the NORMALISED session key. With the raw
+      // epk, the same session re-keyed itself whenever the selection was
+      // written in the other base64 encoding, tearing down and rebuilding
+      // the whole ChatViewModel (and its history) for no reason.
+      key: ValueKey('chat-${sel.sessionKey}'),
       providers: [
         ViewmodelProvider<ChatViewModel>(),
         ViewmodelProvider<VoiceInputViewModel>(),

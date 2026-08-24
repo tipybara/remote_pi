@@ -98,7 +98,16 @@ class WsTransport implements PeerTransport, IControlLink {
             // the chat they're now viewing. When senderRoom doesn't
             // match the currently-addressed Pi cwd, drop the payload.
             // Legacy Pis without `room` route unconditionally.
-            if (senderRoom != null && senderRoom != transport._activeRoom) {
+            //
+            // Plan 61 Phase 3 — the machine control room is exempt. It is not
+            // a chat: it only ever emits `action_ok` / `action_error` for
+            // workspace/session RPCs, so it cannot bleed conversation state
+            // into the active session. Without this exemption every reply from
+            // the gateway would be dropped as a room mismatch, since the app's
+            // active room is whichever chat the user has open.
+            if (senderRoom != null &&
+                senderRoom != transport._activeRoom &&
+                senderRoom != kControlRoomId) {
               debugPrint(
                 '[ws-in] bytes=${rawStr.length} kind=envelope '
                 'sender_room=$senderRoom DROPPED (room-mismatch)',
@@ -205,6 +214,22 @@ class WsTransport implements PeerTransport, IControlLink {
     _ws.sink.add(jsonEncode({
       'peer': _peerPubkey,
       'room': _activeRoom,
+      'ct': base64.encode(data),
+    }));
+  }
+
+  /// Plan 61 Phase 2 — address ONE frame at a specific room without moving
+  /// the active target.
+  ///
+  /// Renaming a session from Home targets whichever session the user
+  /// long-pressed, which is usually NOT the one they are chatting in.
+  /// Re-pointing [setActiveRoom] to send it would silently move the user's
+  /// conversation to another cwd — precisely the class of jump plan 61 exists
+  /// to stop. This leaves `_activeRoom` alone.
+  Future<void> sendToRoom(Uint8List data, String room) async {
+    _ws.sink.add(jsonEncode({
+      'peer': _peerPubkey,
+      'room': room,
       'ct': base64.encode(data),
     }));
   }

@@ -1,3 +1,4 @@
+import 'package:app/data/transport/epk_encoding.dart';
 import 'package:flutter/widgets.dart';
 
 /// Lado menor (em pixels lógicos) a partir do qual o app entra no modo tablet
@@ -89,10 +90,27 @@ class SessionSelection extends ChangeNotifier {
   ({String epk, String roomId, String title, String device, bool online})?
   get current => _current;
 
+  /// Plan-61 Fase 0 — chave estável da seleção: `<epk-normalizado>|<roomId>`.
+  /// `null` quando nada está selecionado. Usada como `ValueKey` do painel
+  /// detail no tablet.
+  String? get sessionKey {
+    final c = _current;
+    return c == null ? null : '${toStandardB64(c.epk)}|${c.roomId}';
+  }
+
   /// `true` se `(epk, roomId)` é a sessão selecionada agora.
+  ///
+  /// Plan-61 Fase 0 — compara o epk **normalizado**. O mesmo Pi chega aqui
+  /// ora em base64url (`PeerRecord.remoteEpk`, vindo do QR/storage) ora em
+  /// base64 padrão (o que o relay reporta). Comparando as strings cruas, a
+  /// mesma sessão deixava de casar consigo mesma e o tile perdia o
+  /// destaque / o detail-pane não reconhecia a seleção. Ver
+  /// `epk_encoding.dart` para o histórico recorrente desse bug.
   bool matches(String epk, String roomId) {
     final c = _current;
-    return c != null && c.epk == epk && c.roomId == roomId;
+    return c != null &&
+        toStandardB64(c.epk) == toStandardB64(epk) &&
+        c.roomId == roomId;
   }
 
   /// Plan/32g — `device` é o nome do dispositivo pareado (nickname /
@@ -110,7 +128,9 @@ class SessionSelection extends ChangeNotifier {
     bool online = false,
   ]) {
     final c = _current;
-    if (c != null && c.epk == epk && c.roomId == roomId) {
+    if (c != null &&
+        toStandardB64(c.epk) == toStandardB64(epk) &&
+        c.roomId == roomId) {
       return; // no-op — evita rebuild do detail/master
     }
     _current = (

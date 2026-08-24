@@ -95,6 +95,17 @@ class HomePage extends StatelessWidget {
       toolbarHeight: 56,
       automaticallyImplyLeading: false,
       actions: [
+        // Plan 61 Phase 3 — create a session on a paired machine. Hidden when
+        // no machine is reachable rather than shown-and-failing: the control
+        // frame rides the active WebSocket, so an unreachable Mac genuinely
+        // cannot be asked.
+        if (vm.canCreateRemoteSessions &&
+            vm.machinesAcceptingSessions.isNotEmpty)
+          IconButton(
+            tooltip: 'New session',
+            icon: Icon(LucideIcons.plus, color: colors.muted2),
+            onPressed: () => _newSession(context, vm),
+          ),
         IconButton(
           tooltip: 'Settings',
           icon: Icon(LucideIcons.settings, color: colors.muted2),
@@ -281,10 +292,18 @@ class HomePage extends StatelessWidget {
     // Plan-38 Fase 3 — presence filter at the top of the list. Pure view:
     // tapping a tab only swaps `state.filter` → `vm.visibleItems` re-derives.
     final tabs = SliverToBoxAdapter(
-      child: HomeFilterTabs(
-        filter: state.filter,
-        counts: counts,
-        onSelected: vm.setFilter,
+      child: Row(
+        children: [
+          Expanded(
+            child: HomeFilterTabs(
+              filter: state.filter,
+              counts: counts,
+              onSelected: vm.setFilter,
+            ),
+          ),
+          _GroupingButton(vm: vm),
+          const SizedBox(width: 12),
+        ],
       ),
     );
 
@@ -308,14 +327,58 @@ class HomePage extends StatelessWidget {
     // even when there's a single Mac, per the mock. A peer with no visible
     // item in this filter contributes no header (the `lastEpk` cursor only
     // advances on rows we actually render).
+    //
+    // Plan 61 Phase 2 — the list is a three-level hierarchy now:
+    // Device (machine) → Workspace (folder) → Session. It used to be a flat
+    // run of session tiles with one header per machine, which meant a Mac
+    // running five sessions across three projects rendered as five
+    // indistinguishable rows whose only clue was a cwd basename in the
+    // subtitle.
+    //
+    // Plan-61 Fase 0 — every row carries a stable `ValueKey`. Without one,
+    // Flutter matches elements by list POSITION: when the list reorders
+    // (a room goes offline, a filter flips, a rename shuffles the order)
+    // index 2's element — with its ink ripple, scroll offset and any
+    // in-flight animation — is silently handed to a different session.
+    // Keying by `HomeItem.sessionKey` (`epk|roomId`) makes the element
+    // follow the SESSION instead. Headers are keyed the same way so a
+    // workspace appearing or emptying doesn't recycle another one's element.
+    //
+    // How MUCH of that hierarchy is rendered is the user's choice
+    // (`HomeGrouping`): the grouped data is identical either way, only the
+    // headers differ. Whatever a header would have said is moved onto the tile
+    // instead, so dropping headers never drops attribution.
+    final grouping = vm.grouping;
     final children = <Widget>[];
-    String? lastEpk;
-    for (final it in visible) {
-      if (it.peer.remoteEpk != lastEpk) {
-        children.add(PeerSectionHeader(peer: it.peer));
-        lastEpk = it.peer.remoteEpk;
+    for (final device in vm.visibleGroups) {
+      final epk = toStandardB64(device.peer.remoteEpk);
+      if (grouping != HomeGrouping.none) {
+        children.add(
+          PeerSectionHeader(key: ValueKey('peer|$epk'), peer: device.peer),
+        );
       }
-      children.add(_buildItemRowAt(context, vm, state, it));
+      for (final ws in device.workspaces) {
+        if (grouping == HomeGrouping.workspace) {
+          children.add(
+            WorkspaceSectionHeader(
+              key: ValueKey('ws|$epk|${ws.path}'),
+              workspace: ws,
+              sessionCount: ws.sessions.length,
+            ),
+          );
+        }
+        for (final it in ws.sessions) {
+          children.add(
+            _buildItemRowAt(
+              context,
+              vm,
+              state,
+              it,
+              contextLabel: _contextLabelFor(grouping, device, ws),
+            ),
+          );
+        }
+      }
     }
     return SliverMainAxisGroup(
       slivers: [
@@ -333,12 +396,32 @@ class HomePage extends StatelessWidget {
     );
   }
 
+  /// What the suppressed headers would have said, for the tile to carry.
+  ///
+  /// `workspace` grouping shows both headers → nothing to add. `device` hides
+  /// the folder → show the folder. `none` hides both → show machine + folder.
+  static String? _contextLabelFor(
+    HomeGrouping grouping,
+    HomeDevice device,
+    HomeWorkspace ws,
+  ) {
+    final folder = ws.path.isEmpty ? null : ws.displayName;
+    return switch (grouping) {
+      HomeGrouping.workspace => null,
+      HomeGrouping.device => folder,
+      HomeGrouping.none => folder == null
+          ? device.displayName
+          : '${device.displayName} / $folder',
+    };
+  }
+
   Widget _buildItemRowAt(
     BuildContext context,
     HomeViewModel vm,
     HomeList state,
-    HomeItem it,
-  ) {
+    HomeItem it, {
+    String? contextLabel,
+  }) {
     final colors = context.colors;
     final isLive = vm.isRoomLive(it.peer.remoteEpk, it.room.roomId);
     final isReconnecting = !vm.isRelayConnected;
@@ -353,6 +436,7 @@ class HomePage extends StatelessWidget {
           it.room.roomId,
         );
     return Column(
+      key: ValueKey(it.sessionKey),
       mainAxisSize: MainAxisSize.min,
       children: [
         SessionTile(
@@ -362,6 +446,7 @@ class HomePage extends StatelessWidget {
           isWorking: isWorking,
           isSelected: isSelected,
           room: it.room,
+          contextLabel: contextLabel,
           onOpen: () => _open(context, vm, it.peer, it.room),
           onLongPress: () => _showSessionMenu(context, vm, it, isLive: isLive),
         ),
@@ -472,7 +557,21 @@ class HomePage extends StatelessWidget {
       },
     );
     if (result == null) return;
-    await vm.renameRoom(it.peer.remoteEpk, it.room.roomId, result);
+    // Plan 61 Phase 2 — the rename now travels to the Pi. Surface the reason
+    // when it doesn't land: previously every rename looked identical whether
+    // or not the Pi ever heard about it.
+    final failure = await vm.renameRoom(
+      it.peer.remoteEpk,
+      it.room.roomId,
+      result,
+    );
+    if (failure == null || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(failure),
+        backgroundColor: context.colors.bg,
+      ),
+    );
   }
 
   Future<void> _confirmDelete(
@@ -548,6 +647,43 @@ class HomePage extends StatelessWidget {
     }
   }
 
+  /// Plan 61 Phase 3 — run the New Session flow and open what it created.
+  ///
+  /// The sheet only returns once the relay has ANNOUNCED the room, so by the
+  /// time we get here the session is genuinely addressable. Opening earlier
+  /// would target a room the relay does not know and the first message would be
+  /// dropped.
+  static Future<void> _newSession(
+    BuildContext context,
+    HomeViewModel vm,
+  ) async {
+    final created = await showNewSessionSheet(context, vm);
+    if (created == null || !context.mounted) return;
+    // Resolve the freshly-announced room from the live snapshot rather than
+    // synthesising one — the app must never derive a room id itself.
+    final peers = switch (vm.state) {
+      HomeList(:final peers) => peers,
+      _ => const <PeerRecord>[],
+    };
+    PeerRecord? peer;
+    for (final p in peers) {
+      if (toStandardB64(p.remoteEpk) == toStandardB64(created.epk)) {
+        peer = p;
+        break;
+      }
+    }
+    if (peer == null) return;
+    RoomInfo? room;
+    for (final r in vm.roomsFor(created.epk)) {
+      if (r.roomId == created.sessionId) {
+        room = r;
+        break;
+      }
+    }
+    if (room == null || !context.mounted) return;
+    await _open(context, vm, peer, room);
+  }
+
   /// Plan/32g — the paired-device label for the Chat AppBar's line 2
   /// (nickname → sessionName → epk prefix). Mirrors [ChatPage]'s own peer
   /// resolution so there's no change when the PeerRecord finishes loading.
@@ -576,6 +712,58 @@ class HomePage extends StatelessWidget {
         : peer.sessionName.isNotEmpty
         ? peer.sessionName
         : peer.remoteEpk.substring(0, 8);
+  }
+}
+
+/// Plan 61 Phase 2 (follow-up) — grouping-depth picker.
+///
+/// A menu rather than a Settings row: it is a layout knob the user flips while
+/// LOOKING at the list, and the effect is only judgeable in place.
+class _GroupingButton extends StatelessWidget {
+  final HomeViewModel vm;
+  const _GroupingButton({required this.vm});
+
+  static const _labels = {
+    HomeGrouping.workspace: 'Device / folder',
+    HomeGrouping.device: 'Device only',
+    HomeGrouping.none: 'No grouping',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final current = vm.grouping;
+    return PopupMenuButton<HomeGrouping>(
+      tooltip: 'Group sessions by…',
+      initialValue: current,
+      color: colors.bg,
+      icon: Icon(LucideIcons.listTree, size: 18, color: colors.muted2),
+      onSelected: vm.setGrouping,
+      itemBuilder: (_) => [
+        for (final g in HomeGrouping.values)
+          PopupMenuItem<HomeGrouping>(
+            value: g,
+            child: Row(
+              children: [
+                Icon(
+                  g == current ? LucideIcons.check : LucideIcons.minus,
+                  size: 14,
+                  color: g == current ? colors.accent : Colors.transparent,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  _labels[g]!,
+                  style: TextStyle(
+                    color: colors.text,
+                    fontSize: 13,
+                    fontFamily: kMonoFamily,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
   }
 }
 

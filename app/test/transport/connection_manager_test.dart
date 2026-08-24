@@ -1223,8 +1223,14 @@ void _registerRoomsTests() {
         await Future<void>.delayed(const Duration(milliseconds: 10));
         expect(cm.activeRoomId, 'main',
             reason: 'no persisted roomId → falls back to main');
-        expect(cm.activePeer?.roomId, isNull,
-            reason: 'legacy peer must remain unbound until discovery');
+        // Plan-61 Fase 0 — "unbound" is no longer signalled by a null
+        // `activePeer.roomId`; that field is a last-opened HINT and the
+        // in-memory record simply mirrors whatever room we point at.
+        // Whether discovery may re-point is tracked separately (an
+        // explicit `switchRoom` / restored `epk:roomId` pins it), which is
+        // what the next expectation exercises.
+        expect(cm.activePeer?.roomId, 'main',
+            reason: 'the in-memory record mirrors the active room pointer');
 
         // Relay announces the real room for this peer.
         ch.pushControl(const RoomAnnounced(
@@ -1491,6 +1497,228 @@ void _registerRoomsTests() {
             reason: 'retry must not snap back to stale peer.roomId');
         expect(cm.activePeer?.roomId, 'channel-A');
         expect(cm.status, isA<StatusOnline>());
+
+        cm.dispose();
+      },
+    );
+
+    // ── Plan-61 Fase 0 — the room pointer is the connection identity ──────
+    //
+    // `PeerRecord.roomId` is now only a last-opened HINT. The authoritative
+    // selection is `Preferences` (`epk:roomId`), handed to boot(), and it
+    // must survive discovery. See plan/61-stable-session-identity.md.
+
+    test(
+      'boot(preferredRoomId) restores the persisted room — a cold start '
+      'reopens the chat the user last had open, not PeerRecord.roomId',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_cold',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          // Stale hint: the last room this pairing happened to persist.
+          roomId: 'stale-hint',
+        );
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage([peer]),
+          emitDebounce: Duration.zero,
+        );
+
+        await cm.boot(preferredEpk: 'epk_cold', preferredRoomId: 'wanted-room');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(cm.activeRoomId, 'wanted-room');
+        expect(ch.activeRoom, 'wanted-room',
+            reason: 'the very first outbound envelope must already be routed');
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'a restored room is PINNED — room discovery must not steal it, even '
+      'when the relay announces a different room first',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_pinned',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+        );
+        final ch = _ControllableChannel();
+        final storage = _FakeStorage([peer]);
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: storage,
+          emitDebounce: Duration.zero,
+        );
+
+        await cm.boot(preferredEpk: 'epk_pinned', preferredRoomId: 'mine');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        // The Mac's OTHER session comes online first.
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_pinned',
+          roomId: 'someone-else',
+          startedAt: 1000,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(cm.activeRoomId, 'mine');
+        expect(ch.activeRoom, 'mine');
+        expect(storage.savedPeers, isEmpty,
+            reason: 'a pinned pointer must not rewrite the hint either');
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'boot without a persisted room falls back to the hint, and discovery '
+      'DOES re-point when that hint is not live (dead hint recovery)',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_dead_hint',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'room-that-died',
+        );
+        final ch = _ControllableChannel();
+        final storage = _FakeStorage([peer]);
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: storage,
+          emitDebounce: Duration.zero,
+        );
+
+        await cm.boot(preferredEpk: 'epk_dead_hint');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(cm.activeRoomId, 'room-that-died',
+            reason: 'no persisted selection → seed from the hint');
+
+        // The Pi is now serving a different cwd. Nothing pinned the
+        // pointer, and the hint is not in the live set, so adopt.
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_dead_hint',
+          roomId: 'room-alive',
+          startedAt: 1000,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(cm.activeRoomId, 'room-alive');
+        expect(storage.savedPeers.last.roomId, 'room-alive',
+            reason: 'the hint is refreshed for the next cold start');
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'a live unpinned room is NOT stolen by another announce on the same '
+      'machine (only a dead pointer is re-pointed)',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_live_hint',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'room-one',
+        );
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage([peer]),
+          emitDebounce: Duration.zero,
+        );
+
+        await cm.boot(preferredEpk: 'epk_live_hint');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_live_hint',
+          roomId: 'room-one',
+          startedAt: 1000,
+        ));
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_live_hint',
+          roomId: 'room-two',
+          startedAt: 1001,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(cm.activeRoomId, 'room-one');
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'switching to a DIFFERENT machine reseeds the pointer from that '
+      "machine's hint — the previous Mac's room id is meaningless there",
+      () async {
+        const macA = PeerRecord(
+          remoteEpk: 'epk_mac_a',
+          sessionName: 'A',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'a-room',
+        );
+        const macB = PeerRecord(
+          remoteEpk: 'epk_mac_b',
+          sessionName: 'B',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-02T00:00:00Z',
+          roomId: 'b-room',
+        );
+        final cm = ConnectionManager(
+          factory: (_, _) async => _ControllableChannel(),
+          storage: _FakeStorage([macA, macB]),
+          emitDebounce: Duration.zero,
+        );
+
+        await cm.connectTo(macA);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        cm.switchRoom('a-other');
+        expect(cm.activeRoomId, 'a-other');
+
+        await cm.switchTo(macB);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(cm.activeRoomId, 'b-room',
+            reason: "mac A's pinned room must not follow us to mac B");
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'switchRoom(epk:) pins for a machine we are not connected to yet — '
+      'Home taps a tile before any WS to that Mac exists',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_pre_pin',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'stale-hint',
+        );
+        final cm = ConnectionManager(
+          factory: (_, _) async => _ControllableChannel(),
+          storage: _FakeStorage([peer]),
+          emitDebounce: Duration.zero,
+        );
+
+        // Home: openSession() → switchRoom BEFORE the chat connects.
+        cm.switchRoom('tapped-room', epk: 'epk_pre_pin');
+        await cm.connectTo(peer);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(cm.activeRoomId, 'tapped-room',
+            reason: 'connect must not reseed over a pin made for this peer');
 
         cm.dispose();
       },

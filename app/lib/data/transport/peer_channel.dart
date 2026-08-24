@@ -77,6 +77,25 @@ class PlainPeerChannel implements IChannel, IControlLink {
     await _transport.send(bytes);
   }
 
+  /// Plan 61 Phase 2 — send ONE message to [roomId] without changing the
+  /// channel's active room.
+  ///
+  /// Uses the same `dynamic` capability probe as [setActiveRoom]: only the WS
+  /// transport tracks rooms, and in-memory test fakes have a single implicit
+  /// destination. Falling back to the plain [send] there is correct — those
+  /// fakes deliver everything to the one peer they model.
+  Future<void> sendToRoom(ClientMessage msg, String roomId) async {
+    final bytes = Uint8List.fromList(utf8.encode(encodeClient(msg).trimRight()));
+    final t = _transport;
+    try {
+      await (t as dynamic).sendToRoom(bytes, roomId) as Future<void>?;
+      return;
+    } catch (_) {
+      // Transport doesn't support per-frame room targeting.
+    }
+    await _transport.send(bytes);
+  }
+
   @override
   Future<void> close() async {
     if (_closed) return;

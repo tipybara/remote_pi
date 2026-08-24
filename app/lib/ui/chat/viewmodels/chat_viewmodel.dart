@@ -161,11 +161,11 @@ class ChatViewModel extends ViewModel<ChatState> {
     // Bind transport before the singleton writer. Otherwise a same-peer room
     // switch can briefly accept old-room frames while SyncService already
     // writes to the new room.
-    _conn.switchRoom(roomId);
+    _conn.switchRoom(roomId, epk: epk);
     if (_conn.activePeer?.remoteEpk != sessionPeer.remoteEpk) {
       await _conn.switchTo(sessionPeer);
       if (_disposed) return;
-      _conn.switchRoom(roomId);
+      _conn.switchRoom(roomId, epk: epk);
     }
 
     // Bind the writer + watch the DB for this (peer, room).
@@ -228,7 +228,7 @@ class ChatViewModel extends ViewModel<ChatState> {
       // WS retry can snap ConnectionManager to a stale cwd — re-align
       // before SessionSync so history + sends target THIS chat.
       if (_conn.activeRoomId != _activeRoomId) {
-        _conn.switchRoom(_activeRoomId);
+        _conn.switchRoom(_activeRoomId, epk: _activePeer?.remoteEpk);
       }
       _sync.requestSync();
     }

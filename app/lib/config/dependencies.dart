@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 
 import 'package:app/config/utils/injector.dart';
 import 'package:app/data/actions/actions_repository.dart';
+import 'package:app/data/control/machine_control_repository.dart';
 import 'package:app/data/mesh/mesh_client.dart';
 import 'package:app/data/mesh/mesh_sync_service.dart';
 import 'package:app/data/local/boxes.dart';
@@ -124,6 +125,11 @@ Future<void> setupDependencies() async {
   );
 
   // Repositories
+  // Plan 61 Phase 3 — the machine control plane (`ctrl` room). Separate from
+  // IActionsRepository because it addresses a MACHINE, not a session.
+  _injector.addRepository<IMachineControlRepository>(
+    () => MachineControlRepository(_injector.get<ConnectionManager>()),
+  );
   _injector.addRepository<IActionsRepository>(
     () => ActionsRepository(_injector.get<ConnectionManager>()),
   );
@@ -143,6 +149,12 @@ Future<void> setupDependencies() async {
       _injector.get<PairingStorage>(),
       _injector.get<Preferences>(),
       _injector.get<ConnectionManager>(),
+      // Plan 61 Phase 2 — Home's rename talks to the Pi now. Optional in the
+      // constructor so the many existing tests that build a HomeViewModel
+      // without an actions stack keep compiling; they exercise the local-only
+      // fallback path.
+      _injector.get<IActionsRepository>(),
+      _injector.get<IMachineControlRepository>(),
     ),
   );
   _injector.addViewModel<SettingsViewModel>(

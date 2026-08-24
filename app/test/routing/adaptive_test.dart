@@ -6,6 +6,7 @@
 //   3. The StatefulShellRoute + navigatorContainerBuilder layout decision:
 //      wide → master + detail side by side; narrow → only the active branch.
 
+import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/routing/adaptive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -96,6 +97,38 @@ void main() {
       sel.select('epkA', 'main', 'Title A again');
       expect(notifications, 0, reason: 'same (epk, room) must not notify');
       expect(sel.current?.title, 'Title A', reason: 'unchanged');
+    });
+
+    test(
+      'plan-61 fase 0 — matches/select normalise the epk: the url-safe form '
+      '(PeerRecord / QR) and the standard form (relay) are the SAME session',
+      () {
+        // Same 32 bytes, the two encodings the app juggles.
+        const urlSafe = 'v_7-_f78-_r5-Pf29fTz8vHw7-7t7Ovq6ejn5uXk4-I';
+        final standard = toStandardB64(urlSafe);
+        expect(standard, isNot(urlSafe), reason: 'fixture must be meaningful');
+
+        final sel = SessionSelection();
+        sel.select(urlSafe, 'r1', 'Chat');
+
+        expect(sel.matches(standard, 'r1'), isTrue,
+            reason: 'the relay reports the standard form for this machine');
+        expect(sel.matches(urlSafe, 'r1'), isTrue);
+        expect(sel.matches(standard, 'r2'), isFalse);
+
+        // The stable key used to key the tablet detail pane.
+        expect(sel.sessionKey, '$standard|r1');
+
+        // Re-selecting the same session in the other encoding is a no-op.
+        var notifications = 0;
+        sel.addListener(() => notifications++);
+        sel.select(standard, 'r1', 'Chat again');
+        expect(notifications, 0);
+      },
+    );
+
+    test('sessionKey is null while nothing is selected', () {
+      expect(SessionSelection().sessionKey, isNull);
     });
 
     test('clear resets to empty and notifies once', () {

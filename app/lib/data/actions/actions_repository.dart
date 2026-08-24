@@ -29,6 +29,7 @@ import 'dart:async';
 
 import 'package:app/data/transport/channel.dart';
 import 'package:app/data/transport/connection_manager.dart';
+import 'package:app/data/transport/peer_channel.dart';
 import 'package:app/domain/contracts/repository.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:app/protocol/uuid7.dart';
@@ -95,6 +96,24 @@ abstract class IActionsRepository extends Repository {
   Future<void> newSession();
   Future<void> setModel(String provider, String modelId);
   Future<void> setThinking(ThinkingLevel level);
+
+  /// Plan 61 Phase 2 — rename a session on the Pi, authoritatively.
+  ///
+  /// [roomId] targets the session being renamed, which is usually NOT the
+  /// active chat (Home long-presses an arbitrary tile). The frame is addressed
+  /// at that room without moving the active target — re-pointing it would drag
+  /// the user's open conversation to another cwd.
+  ///
+  /// [rev] is the `name_rev` this device last saw. The Pi refuses a rename
+  /// carrying a revision older than its own, so the loser of a two-device race
+  /// is told rather than silently overwriting. Throws [ActionFailure] on
+  /// refusal, timeout, or while offline.
+  Future<void> renameSession({
+    required String roomId,
+    required String displayName,
+    String? sessionId,
+    int? rev,
+  });
 
   /// Fetches the model catalogue. When [forceRefresh] is `false`
   /// (default) returns the cached catalogue for the current
@@ -293,6 +312,24 @@ class ActionsRepository extends Repository implements IActionsRepository {
   }
 
   @override
+  Future<void> renameSession({
+    required String roomId,
+    required String displayName,
+    String? sessionId,
+    int? rev,
+  }) async {
+    await _dispatch<void>(
+      (id) => SessionRename(
+        id: id,
+        displayName: displayName,
+        sessionId: sessionId,
+        rev: rev,
+      ),
+      room: roomId,
+    );
+  }
+
+  @override
   Future<ModelsCatalogue> listModels({bool forceRefresh = false}) async {
     final key = _sessionKey();
     if (!forceRefresh) {
@@ -308,7 +345,13 @@ class ActionsRepository extends Repository implements IActionsRepository {
     return result;
   }
 
-  Future<T> _dispatch<T>(ClientMessage Function(String id) builder) async {
+  /// [room] addresses this ONE frame at a specific Pi room without moving the
+  /// channel's active target (plan 61 Phase 2). Omit it for actions that
+  /// operate on the session the user is currently in.
+  Future<T> _dispatch<T>(
+    ClientMessage Function(String id) builder, {
+    String? room,
+  }) async {
     final ch = _channel;
     if (ch == null) {
       throw const ActionFailure('offline');
@@ -325,7 +368,12 @@ class ActionsRepository extends Repository implements IActionsRepository {
     _pending[id] = _Pending(completer: completer, timeout: timer);
 
     try {
-      await ch.send(builder(id));
+      final msg = builder(id);
+      if (room != null && ch is PlainPeerChannel) {
+        await ch.sendToRoom(msg, room);
+      } else {
+        await ch.send(msg);
+      }
     } catch (e) {
       timer.cancel();
       _pending.remove(id);

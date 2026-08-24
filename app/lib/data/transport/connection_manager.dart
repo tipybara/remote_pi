@@ -119,12 +119,34 @@ class ConnectionManager extends Service {
   final Map<String, Set<String>> _liveRoomIds = <String, Set<String>>{};
   final _roomsController =
       StreamController<Map<String, List<RoomInfo>>>.broadcast();
+  /// Plan 61 Phase 3 — undeliverable-destination reports from the relay.
+  /// Consumers (the chat writer) use it to fail outstanding sends for that
+  /// session immediately instead of waiting out the no-echo timer.
+  final _transportErrorController =
+      StreamController<({String epk, String roomId, String reason})>
+          .broadcast();
   bool _roomsRestored = false;
   ConnectionStatus _status = const StatusNoPeer();
   PeerRecord? _activePeer;
   // Plan 17 — active room on the destination Pi. 'main' is the implicit
   // default and matches the per-cwd room a Pi opens.
+  //
+  // Plan-61 Fase 0 — this trio IS the connection identity. `PeerRecord.roomId`
+  // was demoted to a last-opened hint (see its doc): one field per pairing
+  // cannot address a Mac that runs several Pi sessions, and letting a stale
+  // hint win on reconnect is what moved the user to another cwd mid-chat.
+  //
+  //   _activeRoomId    — the room every outbound envelope is addressed to
+  //   _activeRoomOwner — standard-b64 epk the pointer belongs to; when we
+  //                      connect to a DIFFERENT peer the pointer is
+  //                      meaningless and gets reseeded
+  //   _activeRoomPinned— the pointer came from an explicit choice (user tap
+  //                      via [switchRoom], or the persisted `epk:roomId`
+  //                      restored in [boot]). Pinned pointers are never
+  //                      overwritten by room discovery.
   String _activeRoomId = 'main';
+  String? _activeRoomOwner;
+  bool _activeRoomPinned = false;
 
   Timer? _retryTimer;
   Timer? _pingTimer;
@@ -222,6 +244,10 @@ class ConnectionManager extends Service {
   Stream<Map<String, List<RoomInfo>>> get roomsStream =>
       _roomsController.stream;
 
+  /// Plan 61 Phase 3 — see [_transportErrorController].
+  Stream<({String epk, String roomId, String reason})> get transportErrors =>
+      _transportErrorController.stream;
+
   Map<String, List<RoomInfo>> get roomsSnapshot => _roomsSnapshot();
 
   /// Rooms for a single peer (or empty list if none known yet). Accepts
@@ -235,7 +261,20 @@ class ConnectionManager extends Service {
   /// Switch the destination room WITHOUT closing the current WS. The
   /// outer envelope's `room` field on subsequent sends will carry this
   /// value. Use when the user taps a different Pi cwd on Home.
-  void switchRoom(String roomId) {
+  ///
+  /// Plan-61 Fase 0 — an explicit switch PINS the pointer: neither a
+  /// reconnect nor room discovery may move it afterwards. [epk] names the
+  /// machine the room belongs to; pass it when the caller knows the target
+  /// but the manager is not connected to it yet (Home taps a tile before
+  /// any WS exists), otherwise the current active peer is assumed.
+  void switchRoom(String roomId, {String? epk}) {
+    // Pin BEFORE the no-op guard: re-selecting the room we already point at
+    // still turns a tentative hint into a user-chosen target.
+    _activeRoomPinned = true;
+    final owner = epk ?? _activePeer?.remoteEpk;
+    if (owner != null && owner.isNotEmpty) {
+      _activeRoomOwner = toStandardB64(owner);
+    }
     if (roomId == _activeRoomId) {
       return;
     }
@@ -336,7 +375,13 @@ class ConnectionManager extends Service {
   /// No-op when there is already an active peer (online, connecting, or
   /// retrying). In that case we still re-subscribe presence with the
   /// full peer list, since the storage may have changed.
-  Future<void> boot({String? preferredEpk}) async {
+  ///
+  /// Plan-61 Fase 0 — [preferredRoomId] restores the room half of the
+  /// persisted `epk:roomId` selection. Without it, boot only knew the
+  /// machine and the room fell back to `PeerRecord.roomId ?? 'main'`,
+  /// so a cold start reopened whichever room happened to be persisted on
+  /// the pairing instead of the chat the user last had open.
+  Future<void> boot({String? preferredEpk, String? preferredRoomId}) async {
     // Plan-17 follow-up — restore cached rooms from disk FIRST so
     // Home tiles render with last-known state even before the relay
     // pushes a fresh snapshot. Idempotent so reentrant boots are
@@ -372,6 +417,18 @@ class ConnectionManager extends Service {
       );
     } else {
       target = peers.first;
+    }
+    // Plan-61 Fase 0 — apply the persisted room BEFORE connecting, and pin
+    // it, so `_connect` does not reseed from the hint and discovery does
+    // not steal the pointer once the relay starts announcing rooms. Only
+    // valid when the restored epk actually resolved to this peer.
+    if (preferredRoomId != null &&
+        preferredRoomId.isNotEmpty &&
+        preferredEpk != null &&
+        target.remoteEpk == preferredEpk) {
+      _activeRoomId = preferredRoomId;
+      _activeRoomOwner = toStandardB64(target.remoteEpk);
+      _activeRoomPinned = true;
     }
     await _connect(target);
   }
@@ -442,6 +499,9 @@ class ConnectionManager extends Service {
     if (_status is StatusOnline) {
       await (_status as StatusOnline).channel.close();
     }
+    // Same reasoning as `_onChannelLost`: whatever the relay last told us is
+    // live stops being true the moment the socket goes away.
+    _clearLiveRooms();
     if (emitNoPeer) {
       _activePeer = null;
       _emit(const StatusNoPeer());
@@ -467,6 +527,7 @@ class ConnectionManager extends Service {
     _controlSub = null;
     _statusController.close();
     _presenceController.close();
+    _transportErrorController.close();
   }
 
   // ---------------------------------------------------------------------------
@@ -483,32 +544,30 @@ class ConnectionManager extends Service {
     final token = CancelToken();
     _connectCancel = token;
     _connectInFlight = true;
-    // Plan 17 fix — set the destination room from the persisted
-    // PeerRecord BEFORE emitting StatusOnline so the very first send
-    // after connect goes to the right (peer, room) on the relay. If
-    // the PeerRecord predates this fix (`roomId == null`), we keep
-    // `_activeRoomId = 'main'` and rely on the discovery flow in
-    // `_onControl` to learn the real room from a subsequent
-    // `room_announced` push and then update _activeRoomId + persist.
+    // Plan 17 fix — the destination room is settled BEFORE emitting
+    // StatusOnline so the very first send after connect goes to the right
+    // (peer, room) on the relay.
     //
-    // Same-peer reconnect (WS retry after backgrounding): the `peer`
-    // argument is often a stale capture from `_watchChannel` while
-    // `switchRoom` already moved `_activeRoomId` for the cwd the user
-    // is viewing. Trust the live selection — never clobber it from a
-    // lagging peer.roomId (fixes header=cwd-A, messages/sync=cwd-B).
-    final samePeer = _activePeer?.remoteEpk == peer.remoteEpk;
-    if (samePeer && _activePeer?.roomId != null) {
-      _activePeer = peer.copyWith(roomId: _activeRoomId);
-    } else {
-      // Keep a legacy peer unbound until room discovery can persist its
-      // canonical room. Assigning the implicit `main` here would make
-      // `_maybeAdoptLegacyRoom` treat it as already bound.
-      _activePeer = peer;
-      final boundRoom = peer.roomId ?? 'main';
-      if (boundRoom != _activeRoomId) {
-        _activeRoomId = boundRoom;
-      }
+    // Plan-61 Fase 0 — and it SURVIVES the reconnect. The pointer is only
+    // reseeded when the DESTINATION changes (a different Mac), because only
+    // then is the current room id meaningless; `PeerRecord.roomId` is a
+    // hint used exclusively for that reseed. Two paths used to clobber a
+    // live pointer here and both are closed:
+    //   • WS retry after backgrounding — the `peer` argument is a stale
+    //     capture from `_watchChannel` while `switchRoom` had already moved
+    //     the user to another cwd (header=cwd-A, messages/sync=cwd-B);
+    //   • cold start — the persisted `epk:roomId` lost to whatever room the
+    //     pairing happened to carry.
+    // When nothing is known yet we still fall back to `main` and let the
+    // `room_announced` discovery in `_onControl` re-point us.
+    final peerKey = toStandardB64(peer.remoteEpk);
+    if (_activeRoomOwner != peerKey) {
+      final hint = peer.roomId;
+      _activeRoomId = (hint != null && hint.isNotEmpty) ? hint : 'main';
+      _activeRoomOwner = peerKey;
+      _activeRoomPinned = false;
     }
+    _activePeer = peer.copyWith(roomId: _activeRoomId);
     _emit(const StatusConnecting());
 
     try {
@@ -600,6 +659,10 @@ class ConnectionManager extends Service {
         :final model,
         :final thinking,
         :final working,
+        :final sessionId,
+        :final workspacePath,
+        :final nameRev,
+        :final role,
       ):
         final key = toStandardB64(peer);
         final list = _roomsByPeer[key] ?? <RoomInfo>[];
@@ -631,6 +694,11 @@ class ConnectionManager extends Service {
           model: model,
           thinking: thinking ?? preservedThinking,
           working: working ?? preservedWorking,
+          // Plan 61 Phase 1 — the session identity travels with the announce.
+          sessionId: sessionId,
+          workspacePath: workspacePath ?? cwd,
+          nameRev: nameRev,
+          role: role,
         );
         final liveAlready = _liveRoomIds[key]?.contains(roomId) ?? false;
         final identicalEntry = existingIdx >= 0 && list[existingIdx] == next;
@@ -671,6 +739,9 @@ class ConnectionManager extends Service {
         :final working,
         :final hasModel,
         :final hasThinking,
+        :final name,
+        :final hasName,
+        :final nameRev,
       ):
         final key = toStandardB64(peer);
         final list = _roomsByPeer[key];
@@ -691,19 +762,59 @@ class ConnectionManager extends Service {
         // non-null sets it. This is what carries the relay's
         // turn_start/turn_end broadcast to the Home dot for EVERY room.
         final nextWorking = working ?? current.working;
+        // Plan 61 Phase 1 — a rename arrives as a patch on the SAME room id.
+        //
+        // Revision gate: accept only a strictly-newer `name_rev`. Two devices
+        // of the same Owner both hold this room, and a reconnecting one
+        // replays the patch it last saw — without the gate that replay would
+        // drag the label back to an older name. An update that carries no
+        // revision at all is taken on trust (older Pi), and a room that has no
+        // stored revision yet accepts the first one it sees.
+        var nextName = current.name;
+        var nextNameRev = current.nameRev;
+        if (hasName) {
+          final stored = current.nameRev;
+          final accepted =
+              nameRev == null || stored == null || nameRev > stored;
+          if (accepted) {
+            nextName = name;
+            if (nameRev != null) nextNameRev = nameRev;
+          }
+        }
         if (current.model == nextModel &&
             current.thinking == nextThinking &&
-            current.working == nextWorking) {
+            current.working == nextWorking &&
+            current.name == nextName &&
+            current.nameRev == nextNameRev) {
           break; // dedup: nothing actually changed
         }
         list[idx] = current.copyWith(
           model: nextModel,
           thinking: nextThinking,
           working: nextWorking,
+          name: nextName,
+          nameRev: nextNameRev,
         );
         roomsDirty = true;
         // ignore: unawaited_futures
         _persistRoomsForPeer(key);
+      // Plan 61 Phase 3 — the relay could not deliver to this destination.
+      case TransportError(:final peer, :final roomId, :final reason):
+        final key = toStandardB64(peer);
+        // Trust it: the relay is the only party that knows whether a
+        // `(peer, room)` has a live connection. Dropping the room from the
+        // live set turns the tile grey NOW instead of after the ~20s no-echo
+        // timeout, and the next `room_announced` puts it back.
+        final live = _liveRoomIds[key];
+        if (live != null && live.remove(roomId)) {
+          if (live.isEmpty) _liveRoomIds.remove(key);
+          roomsDirty = true;
+        }
+        if (!_transportErrorController.isClosed) {
+          _transportErrorController.add(
+            (epk: key, roomId: roomId, reason: reason),
+          );
+        }
       case RoomsSnapshot(:final peer, :final rooms):
         final key = toStandardB64(peer);
         // Merge snapshot into cache: add unknown rooms, refresh
@@ -728,6 +839,14 @@ class ConnectionManager extends Service {
             // `rooms_of` reads the current registry meta, so its
             // `working` reflects the latest turn_start/turn_end.
             working: r.working,
+            // Plan 61 Phase 1 — same preserve convention as model/thinking:
+            // an older relay omits these, and dropping them would make a
+            // known session look legacy again (and lose its workspace row).
+            sessionId: r.sessionId ?? byId[r.roomId]?.sessionId,
+            workspacePath:
+                r.workspacePath ?? r.cwd ?? byId[r.roomId]?.workspacePath,
+            nameRev: r.nameRev ?? byId[r.roomId]?.nameRev,
+            role: r.role ?? byId[r.roomId]?.role,
           );
         }
         final newList = byId.values.toList();
@@ -899,6 +1018,14 @@ class ConnectionManager extends Service {
               cwd: c.cwd,
               startedAt: c.startedAt,
               model: c.model,
+              // Plan 61 Phase 1 — restore the session identity too. Without
+              // `nameRev` here a stale rename patch landing right after boot
+              // would be accepted (no stored revision to compare against) and
+              // revert a label the user already changed.
+              sessionId: c.sessionId,
+              workspacePath: c.workspacePath ?? c.cwd,
+              nameRev: c.nameRev,
+              role: c.role,
             ),
           )
           .toList();
@@ -939,6 +1066,13 @@ class ConnectionManager extends Service {
             startedAt: r.startedAt,
             localName: localById[r.roomId],
             model: r.model,
+            // Plan 61 Phase 1 — the session identity has to survive a cold
+            // start, otherwise Home would render every cached room as legacy
+            // (no workspace row) until the relay re-announced it.
+            sessionId: r.sessionId,
+            workspacePath: r.workspacePath,
+            nameRev: r.nameRev,
+            role: r.role,
           ),
         )
         .toList();
@@ -990,23 +1124,29 @@ class ConnectionManager extends Service {
     }
   }
 
-  /// Plan 17 fix — legacy migration hook for peers paired before
-  /// `PeerRecord.roomId` existed. When the relay tells us about rooms
-  /// for the active peer, and that peer has no persisted roomId yet,
-  /// we adopt the announced room as canonical:
+  /// Room discovery — points an UNPINNED connection at a room the relay
+  /// actually announced:
   ///   1. Update `_activeRoomId` so outbound envelopes are routed.
   ///   2. Push the change down to the WS transport.
-  ///   3. Persist the choice on the PeerRecord via storage so
-  ///      subsequent app launches address (peer, room) from the start
-  ///      and don't re-trigger discovery.
+  ///   3. Persist it as `PeerRecord.roomId` — the last-opened hint used to
+  ///      seed the next cold start when prefs carry no room.
   void _maybeAdoptLegacyRoom(String peerKey, String discoveredRoom) {
     final active = _activePeer;
     if (active == null) return;
     if (toStandardB64(active.remoteEpk) != peerKey) return;
-    if (active.roomId != null) {
-      return; // explicit room selection — discovery must not override it
-    }
+    // Plan-61 Fase 0 — an explicit selection wins, always. Previously the
+    // guard was `active.roomId != null`, i.e. "has this pairing ever had a
+    // room persisted"; that conflated a stale hint with a user choice and,
+    // once set, also froze the pointer onto a room the Pi may no longer
+    // serve.
+    if (_activeRoomPinned) return;
+    // Unpinned pointer = a hint. Keep it while the relay says it is alive;
+    // re-point only when it is not (dead hint, or the implicit 'main').
+    final live = _liveRoomIds[peerKey];
+    if (live != null && live.contains(_activeRoomId)) return;
+    if (_activeRoomId == discoveredRoom) return;
     _activeRoomId = discoveredRoom;
+    _activeRoomOwner = peerKey;
     final cur = _status;
     if (cur is StatusOnline) {
       _propagateActiveRoom(discoveredRoom, cur.channel);
@@ -1066,7 +1206,27 @@ class ConnectionManager extends Service {
       return;
     }
     _cancelPing();
+    // Plan 61 — the live set is now stale.
+    //
+    // `_liveRoomIds` is what the relay last told us was up. Losing the WS
+    // means we have no fresh signal about ANY room, and `isRoomLive` is
+    // already gated on `StatusOnline` so nothing renders green meanwhile.
+    // But the stale set survived the outage, so the first moment the WS came
+    // back — before the relay's `rooms` snapshot landed — every previously
+    // live room flipped green again, including ones whose Pi had exited
+    // during the outage. Clearing here makes the reconnect honest: rooms go
+    // green only once the relay says so.
+    _clearLiveRooms();
     _scheduleRetry(peer);
+  }
+
+  /// Drop the cached "currently live" set. The cached room LIST
+  /// (`_roomsByPeer`) is deliberately kept — those are the tiles Home shows
+  /// offline/grey, and the user can still open them to read history.
+  void _clearLiveRooms() {
+    if (_liveRoomIds.isEmpty) return;
+    _liveRoomIds.clear();
+    _scheduleRoomsEmit();
   }
 
   void _scheduleRetry(PeerRecord peer) {

@@ -37,17 +37,31 @@ sealed class ControlInbound {
         // or nested under `meta.working`; read both for forward-compat.
         final rawWorking =
             (j['working'] as bool?) ?? (metaJson?['working'] as bool?);
+        // Plan 61 Phase 1 — the session identity. Same dual-read convention
+        // as `thinking`/`working`: the relay serializes RoomMeta flat, but a
+        // relay that forwards the Pi's `room_meta` verbatim nests it.
+        final cwd = j['cwd'] as String?;
         return RoomAnnounced(
           peer: j['peer'] as String,
           roomId: j['room_id'] as String,
           name: j['name'] as String?,
-          cwd: j['cwd'] as String?,
+          cwd: cwd,
           startedAt: (j['started_at'] as num).toInt(),
           model: j['model'] as String?,
           thinking: rawThinking != null
               ? ThinkingLevel.fromWire(rawThinking)
               : null,
           working: rawWorking,
+          sessionId:
+              (j['session_id'] as String?) ?? (metaJson?['session_id'] as String?),
+          workspacePath:
+              (j['workspace_path'] as String?) ??
+              (metaJson?['workspace_path'] as String?) ??
+              cwd,
+          nameRev:
+              ((j['name_rev'] as num?) ?? (metaJson?['name_rev'] as num?))
+                  ?.toInt(),
+          role: (j['role'] as String?) ?? (metaJson?['role'] as String?),
         );
       }(),
       'room_ended' => RoomEnded(
@@ -61,10 +75,26 @@ sealed class ControlInbound {
             .map((e) => RoomInfo.fromJson(e as Map<String, dynamic>))
             .toList(),
       ),
+      // Plan 61 Phase 3 — the relay could not deliver an App↔Pi envelope.
+      //
+      // This path used to fail COMPLETELY silently: the optimistic bubble sat
+      // there until a ~20s no-echo timer swept it, with no way to tell "the Pi
+      // is gone" from "the Pi is slow". The outer envelope carries no message
+      // id and `ct` is opaque, so the relay cannot name a single message — the
+      // error is scoped to the destination `(peer, room_id)` and the client
+      // fails whatever it has outstanding for that session.
+      'transport_error' => TransportError(
+        peer: j['peer'] as String,
+        roomId: (j['room_id'] as String?) ?? 'main',
+        reason: (j['reason'] as String?) ?? 'unknown',
+      ),
       'room_meta_updated' => () {
         final meta = j['meta'] as Map<String, dynamic>?;
         final hasModel = meta?.containsKey('model') ?? false;
         final hasThinking = meta?.containsKey('thinking') ?? false;
+        // Plan 61 Phase 1 — a rename now arrives HERE instead of as
+        // room_ended + a new room_announced under a different id.
+        final hasName = meta?.containsKey('name') ?? false;
         final rawThinking = meta?['thinking'] as String?;
         return RoomMetaUpdated(
           peer: j['peer'] as String,
@@ -79,6 +109,9 @@ sealed class ControlInbound {
           working: meta?['working'] as bool?,
           hasModel: hasModel,
           hasThinking: hasThinking,
+          name: meta?['name'] as String?,
+          hasName: hasName,
+          nameRev: (meta?['name_rev'] as num?)?.toInt(),
         );
       }(),
       _ => null,
@@ -194,6 +227,36 @@ class RoomInfo {
   /// (idle / not reported yet).
   final bool working;
 
+  /// Plan 61 Phase 1 — the authoritative Pi session UUID.
+  ///
+  /// From Phase 1 on the Pi keys its relay room BY this value, so
+  /// `sessionId == roomId` and a rename cannot re-key the room. It is
+  /// published separately because its mere PRESENCE is the signal the app
+  /// needs: a room without it comes from a pre-Phase-1 Pi whose id is
+  /// `sha256(cwd[,name])` and will therefore still change on `/name`.
+  final String? sessionId;
+
+  /// Plan 61 Phase 1 — canonical `realpath(cwd)` of this session's workspace.
+  /// What Phase 2 groups Home by (Device → Workspace → Session). Symlinks are
+  /// already resolved on the Pi side, so two spellings of one directory
+  /// collapse to a single workspace row.
+  final String? workspacePath;
+
+  /// Plan 61 Phase 1 — revision of [name]. Monotonic per machine. A name
+  /// update whose revision is not strictly newer than the one already held is
+  /// a replay from a reconnecting device and must be ignored, otherwise the
+  /// label flickers back to an older value.
+  final int? nameRev;
+
+  /// Plan 61 Phase 3 — `'control'` for the machine gateway's `ctrl` room.
+  /// Home must never render such a room as a chat tile. `null` = ordinary
+  /// chat room.
+  final String? role;
+
+  /// Plan 61 Phase 3 — `true` when this room is a machine control plane
+  /// rather than a conversation.
+  bool get isControlRoom => role == 'control';
+
   const RoomInfo({
     required this.roomId,
     required this.startedAt,
@@ -202,6 +265,10 @@ class RoomInfo {
     this.model,
     this.thinking,
     this.working = false,
+    this.sessionId,
+    this.workspacePath,
+    this.nameRev,
+    this.role,
   });
 
   factory RoomInfo.fromJson(Map<String, dynamic> j) {
@@ -216,6 +283,12 @@ class RoomInfo {
           ? ThinkingLevel.fromWire(rawThinking)
           : null,
       working: (j['working'] as bool?) ?? false,
+      sessionId: j['session_id'] as String?,
+      // Legacy relays/Pis only carry `cwd`; it holds the same canonical path,
+      // so fall back to it rather than leaving the workspace grouping blind.
+      workspacePath: (j['workspace_path'] as String?) ?? (j['cwd'] as String?),
+      nameRev: (j['name_rev'] as num?)?.toInt(),
+      role: j['role'] as String?,
     );
   }
 
@@ -227,18 +300,30 @@ class RoomInfo {
     'model': model,
     if (thinking != null) 'thinking': thinking!.wire,
     'working': working,
+    if (sessionId != null) 'session_id': sessionId,
+    if (workspacePath != null) 'workspace_path': workspacePath,
+    if (nameRev != null) 'name_rev': nameRev,
+    if (role != null) 'role': role,
   };
 
   RoomInfo copyWith({
-    String? name,
+    // Plan 61 Phase 1 — sentinel-typed so a rename can genuinely CLEAR the
+    // name. `String? name` with `name ?? this.name` silently turned
+    // "set to null" into "keep current", which would have made a
+    // rename-to-empty a no-op instead of falling back to the cwd basename.
+    Object? name = _kRoomInfoUnset,
     String? cwd,
     int? startedAt,
     Object? model = _kRoomInfoUnset,
     Object? thinking = _kRoomInfoUnset,
     bool? working,
+    Object? sessionId = _kRoomInfoUnset,
+    Object? workspacePath = _kRoomInfoUnset,
+    Object? nameRev = _kRoomInfoUnset,
+    Object? role = _kRoomInfoUnset,
   }) => RoomInfo(
     roomId: roomId,
-    name: name ?? this.name,
+    name: identical(name, _kRoomInfoUnset) ? this.name : name as String?,
     cwd: cwd ?? this.cwd,
     startedAt: startedAt ?? this.startedAt,
     model: identical(model, _kRoomInfoUnset) ? this.model : model as String?,
@@ -246,6 +331,16 @@ class RoomInfo {
         ? this.thinking
         : thinking as ThinkingLevel?,
     working: working ?? this.working,
+    sessionId: identical(sessionId, _kRoomInfoUnset)
+        ? this.sessionId
+        : sessionId as String?,
+    workspacePath: identical(workspacePath, _kRoomInfoUnset)
+        ? this.workspacePath
+        : workspacePath as String?,
+    nameRev: identical(nameRev, _kRoomInfoUnset)
+        ? this.nameRev
+        : nameRev as int?,
+    role: identical(role, _kRoomInfoUnset) ? this.role : role as String?,
   );
 
   @override
@@ -257,11 +352,26 @@ class RoomInfo {
       other.startedAt == startedAt &&
       other.model == model &&
       other.thinking == thinking &&
-      other.working == working;
+      other.working == working &&
+      other.sessionId == sessionId &&
+      other.workspacePath == workspacePath &&
+      other.nameRev == nameRev &&
+      other.role == role;
 
   @override
-  int get hashCode =>
-      Object.hash(roomId, name, cwd, startedAt, model, thinking, working);
+  int get hashCode => Object.hash(
+    roomId,
+    name,
+    cwd,
+    startedAt,
+    model,
+    thinking,
+    working,
+    sessionId,
+    workspacePath,
+    nameRev,
+    role,
+  );
 }
 
 class RoomAnnounced extends ControlInbound {
@@ -283,6 +393,13 @@ class RoomAnnounced extends ControlInbound {
   /// frame omitted it (legacy relay); the ConnectionManager then keeps
   /// any previously-known value instead of forcing `false`.
   final bool? working;
+
+  /// Plan 61 Phase 1 — see the matching fields on [RoomInfo].
+  final String? sessionId;
+  final String? workspacePath;
+  final int? nameRev;
+  final String? role;
+
   const RoomAnnounced({
     required this.peer,
     required this.roomId,
@@ -292,6 +409,10 @@ class RoomAnnounced extends ControlInbound {
     this.model,
     this.thinking,
     this.working,
+    this.sessionId,
+    this.workspacePath,
+    this.nameRev,
+    this.role,
   });
 }
 
@@ -310,6 +431,22 @@ class RoomsSnapshot extends ControlInbound {
   final String peer;
   final List<RoomInfo> rooms;
   const RoomsSnapshot({required this.peer, required this.rooms});
+}
+
+/// Plan 61 Phase 3 — the relay refused to deliver to `(peer, roomId)`.
+///
+/// [reason] is `'offline'` today (the destination has no live connection).
+/// Scoped to a session, not to a message: see the parser comment for why the
+/// relay cannot correlate to a single frame.
+class TransportError extends ControlInbound {
+  final String peer;
+  final String roomId;
+  final String reason;
+  const TransportError({
+    required this.peer,
+    required this.roomId,
+    required this.reason,
+  });
 }
 
 /// Plan 18 — incremental update to a room's metadata (model is the
@@ -347,6 +484,29 @@ class RoomMetaUpdated extends ControlInbound {
   /// set. No separate `hasWorking` flag is needed because `working` can
   /// never be "explicitly null" on the wire — `false` is the off state.
   final bool? working;
+
+  /// Plan 61 Phase 1 — the session's new display name.
+  ///
+  /// A rename used to reach the app as `room_ended` + `room_announced` under a
+  /// DIFFERENT id (the room was keyed by `sha256(cwd, name)`), which produced a
+  /// second tile and orphaned the first one's history. It is a metadata patch
+  /// now, so it lands here and the room id never moves.
+  final String? name;
+
+  /// `true` when the `meta` envelope carried a `name` key — same
+  /// absent-vs-explicitly-null convention as [hasModel]. Defaults to `false`
+  /// (not `true` like the older flags) because the overwhelming majority of
+  /// these updates are model/thinking/working churn: defaulting to `true`
+  /// would make every one of them look like a rename-to-null.
+  final bool hasName;
+
+  /// Plan 61 Phase 1 — revision of [name]. The receiver must ignore an update
+  /// whose revision is not strictly newer than the one it already holds; a
+  /// reconnecting second device replaying an old patch would otherwise revert
+  /// the label. `null` = the sender published no revision, in which case the
+  /// update is accepted on trust.
+  final int? nameRev;
+
   const RoomMetaUpdated({
     required this.peer,
     required this.roomId,
@@ -355,6 +515,9 @@ class RoomMetaUpdated extends ControlInbound {
     this.working,
     this.hasModel = true,
     this.hasThinking = true,
+    this.name,
+    this.hasName = false,
+    this.nameRev,
   });
 }
 
@@ -596,7 +759,20 @@ enum ActionName {
   sessionNew('session_new'),
   sessionCompact('session_compact'),
   modelSet('model_set'),
-  thinkingSet('thinking_set');
+  thinkingSet('thinking_set'),
+
+  /// Plan 61 Phase 2 — rename a session on the Pi. The label used to be
+  /// app-local, so two devices of the same Owner disagreed about what a
+  /// session was called and the Pi never knew at all.
+  sessionRename('session_rename'),
+
+  // Plan 61 Phase 3 — machine control plane. These are answered by the
+  // supervisor's `ctrl` room, not by a chat session.
+  workspaceList('workspace_list'),
+  sessionList('session_list'),
+  createSession('create_session'),
+  sessionStart('session_start'),
+  sessionStop('session_stop');
 
   final String wire;
   const ActionName(this.wire);
@@ -713,6 +889,172 @@ class SessionNew extends ClientMessage {
 
   @override
   Map<String, dynamic> toJson() => {'type': 'session_new', 'id': id};
+}
+
+/// Plan 61 Phase 2 — authoritative rename of a session.
+///
+/// [sessionId] pins WHICH session is being renamed, so a frame that raced a
+/// session replacement on the Pi is rejected instead of relabelling whatever
+/// session happens to be current. [rev] is the `name_rev` this device last
+/// saw — optimistic concurrency, not the new revision: the Pi mints that. A
+/// [rev] older than the Pi's current one means this device is acting on a
+/// stale label and the rename is refused rather than silently clobbering the
+/// name another device just set.
+class SessionRename extends ClientMessage {
+  final String id;
+  final String displayName;
+  final String? sessionId;
+  final int? rev;
+
+  SessionRename({
+    required this.id,
+    required this.displayName,
+    this.sessionId,
+    this.rev,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'session_rename',
+    'id': id,
+    'display_name': displayName,
+    if (sessionId != null) 'session_id': sessionId,
+    if (rev != null) 'rev': rev,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Plan 61 Phase 3 — machine control plane (the `ctrl` room)
+// ---------------------------------------------------------------------------
+
+/// Reserved room id the machine gateway holds. Mirrors `CONTROL_ROOM_ID` in
+/// `pi-extension/src/protocol/control_wire.ts`. Never a session id and never a
+/// `roomIdFor(...)` digest, so it cannot collide with a chat room.
+const String kControlRoomId = 'ctrl';
+
+/// Ask the machine which workspaces it will accept a session in.
+///
+/// v1 answers with the folders already registered as daemons — there is no way
+/// to name an arbitrary path over the wire, deliberately.
+class WorkspaceList extends ClientMessage {
+  final String id;
+  WorkspaceList({required this.id});
+
+  @override
+  Map<String, dynamic> toJson() => {'type': 'workspace_list', 'id': id};
+}
+
+/// Ask the machine for its session catalogue (optionally one workspace).
+class SessionList extends ClientMessage {
+  final String id;
+  final String? workspaceId;
+  SessionList({required this.id, this.workspaceId});
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'session_list',
+    'id': id,
+    if (workspaceId != null) 'workspace_id': workspaceId,
+  };
+}
+
+/// Spawn a background session in an already-registered workspace.
+///
+/// [idempotencyKey] is mandatory and must be STABLE across retries of the same
+/// user intent: the machine records it, so a phone retrying over a flaky link
+/// replays the original outcome instead of spawning a second process. Minting a
+/// fresh key per retry defeats the mechanism entirely.
+class CreateSession extends ClientMessage {
+  final String id;
+  final String idempotencyKey;
+  final String workspaceId;
+  final String? displayName;
+
+  CreateSession({
+    required this.id,
+    required this.idempotencyKey,
+    required this.workspaceId,
+    this.displayName,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'create_session',
+    'id': id,
+    'idempotency_key': idempotencyKey,
+    'workspace_id': workspaceId,
+    if (displayName != null) 'display_name': displayName,
+    // v1 is background-only; the machine refuses an explicit `false` rather
+    // than silently handing back something else.
+    'background': true,
+  };
+}
+
+/// Start / stop a catalogued session on the machine.
+class SessionStart extends ClientMessage {
+  final String id;
+  final String sessionId;
+  final String idempotencyKey;
+  SessionStart({
+    required this.id,
+    required this.sessionId,
+    required this.idempotencyKey,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'session_start',
+    'id': id,
+    'session_id': sessionId,
+    'idempotency_key': idempotencyKey,
+  };
+}
+
+class SessionStop extends ClientMessage {
+  final String id;
+  final String sessionId;
+  final String idempotencyKey;
+  SessionStop({
+    required this.id,
+    required this.sessionId,
+    required this.idempotencyKey,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'session_stop',
+    'id': id,
+    'session_id': sessionId,
+    'idempotency_key': idempotencyKey,
+  };
+}
+
+/// One workspace the machine will accept a session in.
+class RemoteWorkspace {
+  final String workspaceId;
+  final String path;
+  final String displayName;
+  const RemoteWorkspace({
+    required this.workspaceId,
+    required this.path,
+    required this.displayName,
+  });
+
+  factory RemoteWorkspace.fromJson(Map<String, dynamic> j) => RemoteWorkspace(
+    workspaceId: j['workspace_id'] as String,
+    path: (j['path'] as String?) ?? '',
+    displayName: (j['display_name'] as String?) ?? (j['path'] as String?) ?? '',
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is RemoteWorkspace &&
+      other.workspaceId == workspaceId &&
+      other.path == path &&
+      other.displayName == displayName;
+
+  @override
+  int get hashCode => Object.hash(workspaceId, path, displayName);
 }
 
 class ModelSet extends ClientMessage {
@@ -1296,10 +1638,21 @@ class ActionOk extends ServerMessage {
   /// Raw wire string for `action` kept verbatim so a future Pi adds
   /// a new action without us silently dropping the ack.
   final String rawAction;
+
+  /// Plan 61 Phase 3 — the whole reply frame.
+  ///
+  /// The chat actions only ever needed "it worked", but the machine control
+  /// plane answers with payloads (`workspaces`, `sessions`, the `session_id`
+  /// of a freshly-spawned process). Keeping the raw map means a new control
+  /// action can carry new fields without another protocol class here, and
+  /// existing consumers that only read [action] are untouched.
+  final Map<String, dynamic> data;
+
   ActionOk({
     required this.inReplyTo,
     required this.action,
     required this.rawAction,
+    this.data = const {},
   });
 
   factory ActionOk.fromJson(Map<String, dynamic> j) {
@@ -1309,6 +1662,7 @@ class ActionOk extends ServerMessage {
       inReplyTo: j['in_reply_to'] as String,
       action: parsed ?? ActionName.sessionCompact,
       rawAction: raw,
+      data: j,
     );
   }
 }

@@ -254,4 +254,43 @@ void main() {
       expect(notifications, 1);
     });
   });
+
+  group('PairingStorage — rooms cache is silent (plan-61 fase 0)', () {
+    test(
+      'saveRooms persists WITHOUT notifying — it is the highest-frequency '
+      'write in the app and its only listener (HomeViewModel) would run a '
+      'full list reload on every turn_start/turn_end',
+      () async {
+        final storage = PairingStorage(_FakeSecureStorage());
+        var notifications = 0;
+        storage.addListener(() => notifications++);
+
+        await storage.saveRooms('epk-a', const [
+          PersistedRoom(roomId: 'r1', startedAt: 1700000000000),
+        ]);
+
+        expect(notifications, 0);
+        // …and the data really landed: rooms reach the UI through
+        // ConnectionManager.roomsStream, the cache is only for cold start.
+        expect(await storage.loadRooms('epk-a'), hasLength(1));
+      },
+    );
+
+    test('peer mutations still notify (that channel is unchanged)', () async {
+      final storage = PairingStorage(_FakeSecureStorage());
+      var notifications = 0;
+      storage.addListener(() => notifications++);
+
+      await storage.savePeer(const PeerRecord(
+        remoteEpk: 'epk-a',
+        sessionName: 'A',
+        relayUrl: 'ws://x',
+        pairedAt: '2026-01-01T00:00:00Z',
+      ));
+      expect(notifications, 1);
+
+      await storage.deletePeer('epk-a');
+      expect(notifications, 2);
+    });
+  });
 }

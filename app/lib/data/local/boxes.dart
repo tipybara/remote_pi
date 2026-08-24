@@ -8,6 +8,34 @@
 //   DURABLE  msgs_<epk>__<roomId>   key = seq (int)        → MessageRecord
 //   DURABLE  sessions_index         key = <epk>:<roomId>   → SessionIndexRecord
 //   VOLATILE runtime  (wiped@boot)  key = <epk>:<roomId>   → RuntimeRecord
+//
+// `<epk>` is ALWAYS the url-safe form (`toAppEpk`) — see [LocalBoxes.sessionKey].
+//
+// ── plan 61 Phase 2: why there is no `rp_v3` ────────────────────────────────
+//
+// Plan 61 Phase 2 listed "Hive `rp_v3` keyed by `session_id`, messages
+// `msgs_<session_id>`". That was the plan's assumed MECHANISM for reaching
+// session-keyed storage; Phase 1 reached the same place more cheaply, so the
+// namespace bump was deliberately not taken. Recorded here because the
+// difference is not obvious from the code alone:
+//
+//  * Phase 1 made the Pi key its relay room by the session UUID
+//    (`room_id == session_id`). `<roomId>` above therefore ALREADY is the
+//    session id for every Phase-1 session — the keys are session-keyed today,
+//    with no data movement.
+//  * A namespace bump would mean copying every message box to a new
+//    directory. That is pure migration risk (a partial copy loses
+//    conversations) for zero change in what the keys mean.
+//  * Dropping `<epk>` from the key — the literal `msgs_<session_id>` shape —
+//    is actively unsafe while legacy rooms exist. Their ids are 12-char
+//    truncated digests, and the audit flags collision across machines as a
+//    real (if unlikely) failure mode: two Macs would then share one message
+//    box. The epk costs nothing and removes that class entirely.
+//
+// Boxes orphaned by PRE-Phase-1 renames (history written under a room id no
+// tile points at any more) are left in place. They are unreachable, but they
+// are the user's conversations; deleting them to reclaim space is worse than
+// the leak.
 
 import 'package:app/data/transport/epk_encoding.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -68,5 +96,17 @@ class LocalBoxes {
   static String msgsBoxName(String epk, String roomId) =>
       'msgs_${toAppEpk(epk)}__$roomId';
 
-  static String sessionKey(String epk, String roomId) => '$epk:$roomId';
+  /// Key of a session row in `sessions_index` / `runtime`.
+  ///
+  /// Plan-61 Fase 0 — the epk is normalised with [toAppEpk], exactly like
+  /// [msgsBoxName] already did. Callers reach here with whatever encoding
+  /// their source used (prefs and `PeerRecord` carry base64url; anything
+  /// derived from a relay frame carries base64 standard), and the raw
+  /// `<epk>:<roomId>` form let the SAME session own two index rows —
+  /// one per encoding — so the Home/chat projections disagreed about
+  /// unread state and last message. Existing rows are unaffected: every
+  /// current writer already passes the url-safe form, for which
+  /// [toAppEpk] is the identity.
+  static String sessionKey(String epk, String roomId) =>
+      '${toAppEpk(epk)}:$roomId';
 }
