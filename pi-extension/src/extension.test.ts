@@ -7,10 +7,11 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { roomIdFor, roomIdForCwd } from "./rooms.js";
 import { getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
@@ -204,6 +205,9 @@ const indexModule = await import("./index.js");
 const {
   default: extension,
   _getState,
+  _getRoomIdForTest,
+  _getPiSessionIdForTest,
+  _resetPiSessionIdForTest,
   _onPeerDisconnect,
   routeClientMessage,
   _mapAgentMessagesToEvents,
@@ -3976,7 +3980,13 @@ describe("relay control channel + relay-state event", () => {
     expect(_getState()).toBe("idle");
   });
 
-  test("rename:<name> restarts Relay room without restarting process/session", async () => {
+  // Plan 61 Phase 1 — a rename is METADATA. This test used to assert the
+  // opposite ("restarts Relay room"): the room id was `roomIdFor(cwd, name)`,
+  // so publishing a rename meant closing the WS and re-registering under a new
+  // id. The app saw `room_ended` + a brand-new tile, the Hive box holding the
+  // conversation was orphaned under the dead id, and any streaming turn on the
+  // socket died with it. `room_id == session_id` now, so nothing moves.
+  test("rename:<name> patches room_meta and does NOT cycle the Relay room", async () => {
     const sendMessage = vi.fn();
     captureHandler("remote-pi");
     _setPiForTest(makeSpyPi(sendMessage));
@@ -3985,14 +3995,23 @@ describe("relay control channel + relay-state event", () => {
     const firstRelay = relayRef.current!;
 
     sendMessage.mockClear();
+    firstRelay.sendControl.mockClear();
     await _handleControl("rename:Renamed");
 
-    expect(firstRelay.close).toHaveBeenCalledTimes(1);
-    expect(relayInstances).toHaveLength(2);
-    expect(relayInstances[1]!.connect).toHaveBeenCalledWith(expect.objectContaining({
-      roomMeta: expect.objectContaining({ name: "Renamed" }),
-    }));
+    expect(firstRelay.close).not.toHaveBeenCalled();
+    expect(relayInstances).toHaveLength(1);
+    expect(relayRef.current).toBe(firstRelay);
     expect(_getState()).toBe("started");
+
+    const patch = firstRelay.sendControl.mock.calls
+      .map((c) => c[0] as { type: string; room_id?: string; meta?: { name?: string; name_rev?: number } })
+      .reverse()
+      .find((f) => f?.type === "room_meta_update" && f.meta?.name !== undefined);
+    expect(patch).toBeDefined();
+    expect(patch!.meta!.name).toBe("Renamed");
+    expect(typeof patch!.meta!.name_rev).toBe("number");
+    expect(patch!.room_id).toBe(_getRoomIdForTest());
+
     // Cockpit is told the new effective name via remote-pi:name-assigned.
     const ev = sendMessage.mock.calls
       .map((c) => c[0] as { customType?: string; display?: boolean; details?: Record<string, unknown> })
@@ -4001,6 +4020,30 @@ describe("relay control channel + relay-state event", () => {
     expect(ev).toBeDefined();
     expect(ev!.display).toBe(false);
     expect(ev!.details).toMatchObject({ requested: "Renamed", assigned: "Renamed", changed: false });
+
+    const stop = captureHandler("remote-pi stop");
+    await stop("", makeMockCtx());
+  });
+
+  // The revision has to keep climbing, otherwise the relay (which only accepts
+  // a strictly-newer `name_rev`) would reject the second rename and the label
+  // would stick on the first one.
+  test("successive renames carry strictly increasing name_rev", async () => {
+    captureHandler("remote-pi");
+    _setPiForTest(makeSpyPi(vi.fn()));
+    await _connectForTest(makeMockCtx());
+    const relay = relayRef.current!;
+    relay.sendControl.mockClear();
+
+    await _handleControl("rename:One");
+    await _handleControl("rename:Two");
+
+    const revs = relay.sendControl.mock.calls
+      .map((c) => c[0] as { type: string; meta?: { name?: string; name_rev?: number } })
+      .filter((f) => f?.type === "room_meta_update" && f.meta?.name !== undefined)
+      .map((f) => f.meta!.name_rev!);
+    expect(revs.length).toBeGreaterThanOrEqual(2);
+    expect(revs[revs.length - 1]!).toBeGreaterThan(revs[revs.length - 2]!);
 
     const stop = captureHandler("remote-pi stop");
     await stop("", makeMockCtx());
@@ -4485,7 +4528,12 @@ describe("model meta", () => {
     expect(capturedOpts[0]!.roomMeta?.name).toBe("dotfiles-019ffb64");
   });
 
-  test("session_info_changed reopens the relay under the exact new name without reusing stale session ctx", async () => {
+  // Plan 61 Phase 1 — a Pi-side rename (`/name`, which surfaces as
+  // `session_info_changed`) publishes the new label as a patch. It used to
+  // REOPEN the relay under a name-derived room id; the stale-ctx scaffolding
+  // below is what that reopen kept tripping over. Now there is no reopen at
+  // all, and the stale ctx is simply never touched.
+  test("session_info_changed patches the name without reopening the relay or touching a stale session ctx", async () => {
     const capturedOpts: Array<{ roomMeta?: { name?: string } }> = [];
     _defaultConnectImpl = async (opts?: unknown) => {
       capturedOpts.push(opts as { roomMeta?: { name?: string } });
@@ -4499,6 +4547,8 @@ describe("model meta", () => {
       getThinkingLevel: () => "high",
     });
     await _connectForTest(makeMockCtx(cwd));
+    const relay = relayRef.current!;
+    relay.sendControl.mockClear();
 
     const liveCtx = makeMockCtx(cwd);
     let stale = false;
@@ -4522,8 +4572,14 @@ describe("model meta", () => {
     sessionName = "after-019ffb64";
     onSessionInfoChanged({ type: "session_info_changed", name: sessionName });
 
-    await vi.waitFor(() => expect(capturedOpts).toHaveLength(2));
-    expect(capturedOpts[1]!.roomMeta?.name).toBe("after-019ffb64");
+    await vi.waitFor(() => {
+      const patch = relay.sendControl.mock.calls
+        .map((c) => c[0] as { type: string; meta?: { name?: string } })
+        .find((f) => f?.type === "room_meta_update" && f.meta?.name === "after-019ffb64");
+      expect(patch).toBeDefined();
+    });
+    expect(capturedOpts).toHaveLength(1);
+    expect(relayInstances).toHaveLength(1);
     expect(_getState()).toBe("started");
   });
 
@@ -4690,5 +4746,317 @@ describe("model meta", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── plan 61 Phase 1 — stable session identity ────────────────────────────────
+//
+// `room_id` used to be `sha256(cwd[,name])`, so the transport key was a
+// function of an editable label. Phase 1 makes it the Pi session UUID: renames
+// become metadata and two sessions in one folder are distinct for free.
+describe("plan 61 Phase 1 — room_id is the Pi session id", () => {
+  const sessionId = "019ffb64-7c21-7a3f-9d2e-4b1c8a0f6e5d";
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    _knownPeers.length = 0;
+    relayRef.current = null;
+    relayInstances.length = 0;
+    _defaultConnectImpl = async () => undefined;
+    _setDisposedForTest(false);
+    _resetPiSessionIdForTest();
+    const stop = captureHandler("remote-pi stop");
+    await stop("", makeMockCtx());
+  });
+
+  afterEach(async () => {
+    // The latch is module state; leaking it would silently re-key the relay
+    // room of every later test that expects the legacy cwd-derived id.
+    _resetPiSessionIdForTest();
+    const stop = captureHandler("remote-pi stop");
+    await stop("", makeMockCtx());
+  });
+
+  function sessionCtx(cwd: string, id: string | undefined) {
+    return {
+      ...makeMockCtx(cwd),
+      sessionManager: { getSessionId: () => id },
+    };
+  }
+
+  /** Minimal ExtensionAPI stub with a mutable session name (local copy — the
+   *  one in the relay-control describe is scoped to that block). */
+  function stubPi() {
+    let sessionName = "pi-extension";
+    return {
+      on: () => undefined, registerCommand: () => undefined,
+      registerTool: () => undefined, registerShortcut: () => undefined,
+      registerFlag: () => undefined, getFlag: () => undefined,
+      registerMessageRenderer: () => undefined,
+      getSessionName: () => sessionName,
+      setSessionName: (name: string) => { sessionName = name; },
+      sendMessage: vi.fn(), sendUserMessage: () => undefined,
+    } as unknown as ExtensionAPI;
+  }
+
+  test("hello registers under the session id and publishes the session identity", async () => {
+    const capturedOpts: Array<{ roomId?: string; roomMeta?: Record<string, unknown> }> = [];
+    _defaultConnectImpl = async (opts?: unknown) => {
+      capturedOpts.push(opts as { roomId?: string; roomMeta?: Record<string, unknown> });
+    };
+    const cwd = mkdtempSync(join(tmpdir(), "remote-pi-p61-"));
+    const onSessionStart = captureEventHandler("session_start");
+    captureHandler("remote-pi");
+    _setPiForTest(stubPi());
+
+    onSessionStart({ type: "session_start", reason: "startup" }, sessionCtx(cwd, sessionId));
+    expect(_getPiSessionIdForTest()).toBe(sessionId);
+
+    await _connectForTest(makeMockCtx(cwd));
+
+    expect(capturedOpts).toHaveLength(1);
+    expect(capturedOpts[0]!.roomId).toBe(sessionId);
+    expect(capturedOpts[0]!.roomMeta).toMatchObject({
+      session_id: sessionId,
+      // realpath — macOS /tmp is a symlink to /private/tmp, and Phase 2 groups
+      // by this value, so both spellings must collapse to one workspace.
+      workspace_path: realpathSync(cwd),
+    });
+    expect(typeof capturedOpts[0]!.roomMeta!["name_rev"]).toBe("number");
+    expect(_getRoomIdForTest()).toBe(sessionId);
+  });
+
+  test("with no resolvable session id it falls back to the legacy cwd room and does NOT claim a session_id", async () => {
+    const capturedOpts: Array<{ roomId?: string; roomMeta?: Record<string, unknown> }> = [];
+    _defaultConnectImpl = async (opts?: unknown) => {
+      capturedOpts.push(opts as { roomId?: string; roomMeta?: Record<string, unknown> });
+    };
+    const cwd = mkdtempSync(join(tmpdir(), "remote-pi-p61-legacy-"));
+    const onSessionStart = captureEventHandler("session_start");
+    captureHandler("remote-pi");
+    _setPiForTest(stubPi());
+    // Models an SDK that exposes no session id at all. Firing session_start
+    // explicitly also re-binds `_lastEventCtx`, which the resolver consults as
+    // a fallback — otherwise a ctx left behind by an earlier test would still
+    // hand us an id.
+    onSessionStart({ type: "session_start", reason: "startup" }, sessionCtx(cwd, undefined));
+    expect(_getPiSessionIdForTest()).toBeNull();
+
+    await _connectForTest(makeMockCtx(cwd));
+
+    // Exactly the legacy derivation, name axis included — `stubPi` reports
+    // "pi-extension", which is not this tmpdir's default agent name, so the
+    // fallback must be the NAME-scoped id, not the bare cwd one.
+    expect(capturedOpts[0]!.roomId).toBe(roomIdFor(cwd, "pi-extension"));
+    expect(capturedOpts[0]!.roomId).not.toBe(roomIdForCwd(cwd));
+    expect(capturedOpts[0]!.roomMeta).not.toHaveProperty("session_id");
+    // The workspace key is still published — Phase 2 grouping must work for a
+    // legacy room too.
+    expect(capturedOpts[0]!.roomMeta!["workspace_path"]).toBe(realpathSync(cwd));
+  });
+
+  test("INVARIANT: a rename leaves room_id untouched (no room_ended / new tile)", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "remote-pi-p61-rename-"));
+    const onSessionStart = captureEventHandler("session_start");
+    captureHandler("remote-pi");
+    _setPiForTest(stubPi());
+    onSessionStart({ type: "session_start", reason: "startup" }, sessionCtx(cwd, sessionId));
+    await _connectForTest(makeMockCtx(cwd));
+
+    const before = _getRoomIdForTest();
+    const relay = relayRef.current!;
+    await _handleControl("rename:Something Else");
+
+    expect(_getRoomIdForTest()).toBe(before);
+    expect(_getRoomIdForTest()).toBe(sessionId);
+    expect(relay.close).not.toHaveBeenCalled();
+    expect(relayInstances).toHaveLength(1);
+  });
+
+  test("a session replacement re-keys the room to the NEW session id", async () => {
+    const capturedOpts: Array<{ roomId?: string }> = [];
+    _defaultConnectImpl = async (opts?: unknown) => {
+      capturedOpts.push(opts as { roomId?: string });
+    };
+    const cwd = mkdtempSync(join(tmpdir(), "remote-pi-p61-replace-"));
+    const onSessionStart = captureEventHandler("session_start");
+    captureHandler("remote-pi");
+    _setPiForTest(stubPi());
+
+    onSessionStart({ type: "session_start", reason: "startup" }, sessionCtx(cwd, sessionId));
+    await _connectForTest(makeMockCtx(cwd));
+    expect(capturedOpts[0]!.roomId).toBe(sessionId);
+
+    // `/new` → a genuinely different session deserves a different room.
+    const second = "019ffb64-9999-7a3f-9d2e-4b1c8a0f6e5d";
+    const stop = captureHandler("remote-pi stop");
+    await stop("", makeMockCtx(cwd));
+    onSessionStart({ type: "session_start", reason: "new" }, sessionCtx(cwd, second));
+    await _connectForTest(makeMockCtx(cwd));
+
+    expect(capturedOpts[1]!.roomId).toBe(second);
+  });
+});
+
+// ── plan 61 Phase 2 — app-driven rename over the wire ───────────────────────
+//
+// The Home long-press rename was app-LOCAL: it wrote into the phone's own
+// cache, so a second device of the same Owner kept the old label and the Pi
+// never learned the new one. `session_rename` makes it authoritative.
+describe("plan 61 Phase 2 — session_rename", () => {
+  const sessionId = "019ffb64-7c21-7a3f-9d2e-4b1c8a0f6e5d";
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    _knownPeers.length = 0;
+    relayRef.current = null;
+    relayInstances.length = 0;
+    _defaultConnectImpl = async () => undefined;
+    _setDisposedForTest(false);
+    _resetPiSessionIdForTest();
+    const stop = captureHandler("remote-pi stop");
+    await stop("", makeMockCtx());
+  });
+
+  afterEach(async () => {
+    _resetPiSessionIdForTest();
+    const stop = captureHandler("remote-pi stop");
+    await stop("", makeMockCtx());
+  });
+
+  function renamePatches() {
+    return relayRef.current!.sendControl.mock.calls
+      .map((c) => c[0] as { type: string; meta?: { name?: string; name_rev?: number } })
+      .filter((f) => f?.type === "room_meta_update" && f.meta?.name !== undefined);
+  }
+
+  function actionReplies(sendsBefore: number) {
+    return relayRef.current!.send.mock.calls
+      .slice(sendsBefore)
+      .map((c) => decodeSentCt(c[0] as string).inner)
+      .filter((i) => i.type === "action_ok" || i.type === "action_error");
+  }
+
+  test("applies the new name, patches room_meta, and acks", async () => {
+    await _pairForTest("peer-rename-1");
+    const before = relayRef.current!.send.mock.calls.length;
+    relayRef.current!.sendControl.mockClear();
+
+    routeClientMessage(
+      { type: "session_rename", id: "rpc-1", display_name: "  Refactor auth  " },
+      { abort: () => undefined },
+    );
+    await vi.waitFor(() => expect(actionReplies(before)).toHaveLength(1));
+
+    expect(actionReplies(before)[0]).toMatchObject({
+      type: "action_ok",
+      in_reply_to: "rpc-1",
+      action: "session_rename",
+    });
+    const patches = renamePatches();
+    expect(patches).toHaveLength(1);
+    // Whitespace is trimmed — the label is what the user sees.
+    expect(patches[0]!.meta!.name).toBe("Refactor auth");
+    expect(typeof patches[0]!.meta!.name_rev).toBe("number");
+    // The room id is untouched: that is the Phase 1 invariant this builds on.
+    expect(relayInstances).toHaveLength(1);
+    expect(relayRef.current!.close).not.toHaveBeenCalled();
+  });
+
+  test("an empty / whitespace-only name is refused", async () => {
+    await _pairForTest("peer-rename-2");
+    const before = relayRef.current!.send.mock.calls.length;
+    relayRef.current!.sendControl.mockClear();
+
+    routeClientMessage(
+      { type: "session_rename", id: "rpc-2", display_name: "   " },
+      { abort: () => undefined },
+    );
+    await vi.waitFor(() => expect(actionReplies(before)).toHaveLength(1));
+
+    expect(actionReplies(before)[0]).toMatchObject({
+      type: "action_error",
+      in_reply_to: "rpc-2",
+      action: "session_rename",
+    });
+    expect(renamePatches()).toHaveLength(0);
+  });
+
+  test("a frame addressed to a DIFFERENT session is refused, not misapplied", async () => {
+    // Models the race: the app sends a rename while the Pi replaces its
+    // session. Applying it would relabel a session the user never touched.
+    const onSessionStart = captureEventHandler("session_start");
+    onSessionStart(
+      { type: "session_start", reason: "startup" },
+      { ...makeMockCtx(), sessionManager: { getSessionId: () => sessionId } },
+    );
+    await _pairForTest("peer-rename-3");
+    const before = relayRef.current!.send.mock.calls.length;
+    relayRef.current!.sendControl.mockClear();
+
+    routeClientMessage(
+      {
+        type: "session_rename",
+        id: "rpc-3",
+        display_name: "Wrong target",
+        session_id: "019ffb64-dead-7a3f-9d2e-4b1c8a0f6e5d",
+      },
+      { abort: () => undefined },
+    );
+    await vi.waitFor(() => expect(actionReplies(before)).toHaveLength(1));
+
+    expect(actionReplies(before)[0]!.type).toBe("action_error");
+    expect(renamePatches()).toHaveLength(0);
+  });
+
+  test("a stale rev loses the two-device race instead of clobbering", async () => {
+    await _pairForTest("peer-rename-4");
+    relayRef.current!.sendControl.mockClear();
+
+    // Device A renames → the Pi mints a fresh (large, clock-seeded) revision.
+    routeClientMessage(
+      { type: "session_rename", id: "rpc-4a", display_name: "From A" },
+      { abort: () => undefined },
+    );
+    await vi.waitFor(() => expect(renamePatches()).toHaveLength(1));
+    const mintedRev = renamePatches()[0]!.meta!.name_rev!;
+
+    // Device B was still showing the pre-rename label and sends its own with
+    // the older revision it last saw.
+    const before = relayRef.current!.send.mock.calls.length;
+    routeClientMessage(
+      {
+        type: "session_rename",
+        id: "rpc-4b",
+        display_name: "From B",
+        rev: mintedRev - 1,
+      },
+      { abort: () => undefined },
+    );
+    await vi.waitFor(() => expect(actionReplies(before)).toHaveLength(1));
+
+    expect(actionReplies(before)[0]!.type).toBe("action_error");
+    expect(renamePatches()).toHaveLength(1);
+    expect(renamePatches()[0]!.meta!.name).toBe("From A");
+  });
+
+  test("a rev equal to the current one still wins (only OLDER is stale)", async () => {
+    await _pairForTest("peer-rename-5");
+    relayRef.current!.sendControl.mockClear();
+
+    routeClientMessage(
+      { type: "session_rename", id: "rpc-5a", display_name: "First" },
+      { abort: () => undefined },
+    );
+    await vi.waitFor(() => expect(renamePatches()).toHaveLength(1));
+    const rev = renamePatches()[0]!.meta!.name_rev!;
+
+    routeClientMessage(
+      { type: "session_rename", id: "rpc-5b", display_name: "Second", rev },
+      { abort: () => undefined },
+    );
+    await vi.waitFor(() => expect(renamePatches()).toHaveLength(2));
+    expect(renamePatches()[1]!.meta!.name).toBe("Second");
+    expect(renamePatches()[1]!.meta!.name_rev!).toBeGreaterThan(rev);
   });
 });

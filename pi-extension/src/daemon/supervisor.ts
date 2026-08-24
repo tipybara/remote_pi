@@ -29,6 +29,8 @@ import {
   type NewJobInput,
 } from "./cron_registry.js";
 import { appendCronLog, readCronLog, type CronResult } from "./cron_log.js";
+import { Gateway } from "./gateway.js";
+import { listSessions } from "./sessions.js";
 
 /**
  * Central process that owns the daemon fleet (plan/26).
@@ -94,6 +96,11 @@ function _probeSupervisor(path: string): Promise<boolean> {
 }
 
 export interface SupervisorOptions {
+  /**
+   * Plan 61 Phase 3 — set `false` to skip the relay control plane. Tests use
+   * it so a supervisor under test never opens a real WebSocket.
+   */
+  gateway?: boolean;
   /** Absolute path to remote-pi's dist/index.js — passed as -e to each
    *  spawned `pi`. Defaults to the location relative to where this file
    *  is bundled (so the supervisor finds itself). */
@@ -129,6 +136,14 @@ export class Supervisor {
   private readonly children = new Map<string, ChildSlot>();
   /** Live croner schedules, keyed by cron job id (plan/39). */
   private readonly cronJobs = new Map<string, Cron>();
+  /**
+   * Plan 61 Phase 3 — workspace id → the session identity its child adopts.
+   * Kept so a crash-restart re-adopts the same one instead of letting the room
+   * move under the app.
+   */
+  private readonly sessionIds = new Map<string, string>();
+  /** Plan 61 Phase 3 — the machine's relay control plane. */
+  private gateway: Gateway | null = null;
   private shuttingDown = false;
 
   constructor(private readonly opts: SupervisorOptions) {}
@@ -144,11 +159,68 @@ export class Supervisor {
     // Cron (plan/39): schedule all enabled jobs, then run any missed catchup.
     this._reconcileCron();
     this._runCatchup();
+    // Plan 61 Phase 3 — open the machine control room LAST, so by the time the
+    // phone can talk to us the fleet already reflects the desired state.
+    // A gateway failure (relay down, no identity yet) must not take the
+    // supervisor with it: the fleet keeps running locally and the next start
+    // retries.
+    await this._startGateway();
+  }
+
+  private async _startGateway(): Promise<void> {
+    if (this.opts.gateway === false) return;
+    const gateway = new Gateway({
+      host: {
+        startWorkspace: async (workspaceId, sessionId) => {
+          const entry = listDaemons().find((d) => d.id === workspaceId);
+          if (!entry) throw new Error(`unknown workspace: ${workspaceId}`);
+          const slot = this.children.get(workspaceId);
+          if (slot && slot.child.state === "running") {
+            // Idempotent: already up. Record the identity anyway so a later
+            // restart keeps it.
+            this.sessionIds.set(workspaceId, sessionId);
+            return;
+          }
+          this._spawnEntry(entry.id, entry.cwd, entry.name, sessionId);
+        },
+        stopWorkspace: async (workspaceId) => {
+          const slot = this.children.get(workspaceId);
+          if (!slot || slot.child.state !== "running") return;
+          if (slot.restartTimer !== null) {
+            clearTimeout(slot.restartTimer);
+            slot.restartTimer = null;
+          }
+          await slot.child.stop();
+        },
+        isWorkspaceRunning: (workspaceId) =>
+          this.children.get(workspaceId)?.child.state === "running",
+      },
+      log: {
+        info: (m) => process.stderr.write(`[remote-pi-supervisord] ${m}\n`),
+        warn: (m) => process.stderr.write(`[remote-pi-supervisord] ${m}\n`),
+      },
+    });
+    try {
+      await gateway.start();
+      this.gateway = gateway;
+    } catch (e) {
+      process.stderr.write(
+        `[remote-pi-supervisord] control room unavailable (${String(e)}); ` +
+        "the fleet keeps running locally\n",
+      );
+      try { await gateway.stop(); } catch { /* best-effort */ }
+    }
   }
 
   /** Graceful shutdown: stop all children, close UDS. */
   async stop(): Promise<void> {
     this.shuttingDown = true;
+    // Plan 61 Phase 3 — close the control room first so no inbound action
+    // races the teardown and re-spawns a child we are about to reap.
+    if (this.gateway) {
+      await this.gateway.stop();
+      this.gateway = null;
+    }
     // Stop all cron schedules (plan/39) so no fire races with teardown.
     for (const c of this.cronJobs.values()) c.stop();
     this.cronJobs.clear();
@@ -553,12 +625,41 @@ export class Supervisor {
   // ── Child lifecycle ──────────────────────────────────────────────────────
 
   private _spawnAllFromRegistry(): void {
+    // Plan 61 Phase 3 — respect the operator's persisted intent.
+    //
+    // `stop` used to be in-memory only, so a supervisor restart brought back a
+    // daemon the user had deliberately stopped (the daemon audit's "desired
+    // running: none" row). A workspace whose catalogue sessions are ALL marked
+    // `desired: stopped` stays down; a workspace with no catalogue entry at all
+    // is a plain registered daemon and keeps the historical always-start
+    // behaviour.
+    const desiredByWorkspace = new Map<string, boolean>();
+    for (const s of listSessions()) {
+      const wanted = desiredByWorkspace.get(s.workspace_id) ?? false;
+      desiredByWorkspace.set(s.workspace_id, wanted || s.desired === "running");
+      if (s.desired === "running") this.sessionIds.set(s.workspace_id, s.session_id);
+    }
     for (const entry of listDaemons()) {
-      this._spawnEntry(entry.id, entry.cwd, entry.name);
+      const wanted = desiredByWorkspace.get(entry.id);
+      if (wanted === false) continue;
+      this._spawnEntry(entry.id, entry.cwd, entry.name, this.sessionIds.get(entry.id));
     }
   }
 
-  private _spawnEntry(id: string, cwd: string, name?: string): void {
+  /**
+   * Plan 61 Phase 3 — [sessionId], when given, is the stable identity the child
+   * adopts for its relay room (`REMOTE_PI_SESSION_ID` → `room_id ==
+   * session_id`). The supervisor mints it in the session catalogue BEFORE the
+   * process exists, which is what lets the phone wait on a specific session
+   * instead of guessing which newly-announced room is the one it asked for.
+   *
+   * It is also more stable than the Pi's own per-process session id for a
+   * daemon: `--continue` can fail, and `session_new` deliberately rolls the id
+   * over, either of which would re-key the room and orphan the conversation —
+   * exactly what Phase 1 set out to stop. When absent (an ordinary registered
+   * daemon started locally), the child falls back to its own session id.
+   */
+  private _spawnEntry(id: string, cwd: string, name?: string, sessionId?: string): void {
     // Clean up any prior slot (e.g. crashed + waiting for backoff).
     const existing = this.children.get(id);
     if (existing) {
@@ -580,6 +681,13 @@ export class Supervisor {
       cwd,
       config,
     };
+    // Remember it so a crash-restart re-adopts the SAME session identity —
+    // otherwise the room would move on every restart.
+    const effectiveSessionId = sessionId ?? this.sessionIds.get(id);
+    if (effectiveSessionId) {
+      this.sessionIds.set(id, effectiveSessionId);
+      childOpts.env = { REMOTE_PI_SESSION_ID: effectiveSessionId };
+    }
     if (this.opts.piBin !== undefined) childOpts.piBin = this.opts.piBin;
     const child = new RpcChild(childOpts);
     const slot: ChildSlot = { id, cwd, child, restartTimer: null, restartAttempt: 0 };

@@ -35,6 +35,24 @@ export interface RoomMeta {
   model?: string;
   thinking?: string;
   working?: boolean;
+  /**
+   * Plan 61 Phase 1 — the authoritative Pi session UUID. From Phase 1 on this
+   * equals `room_id`; it is published separately so the app can tell a
+   * session-keyed room from a legacy `sha256(cwd[,name])` one during the alias
+   * window. Absent when the session id was not resolvable at connect time.
+   */
+  session_id?: string;
+  /** Plan 61 Phase 1 — canonical `realpath(cwd)`. Same value as `cwd`, named
+   *  for what Phase 2 groups by (workspace), not for the process's notion of
+   *  "current directory". */
+  workspace_path?: string;
+  /** Plan 61 Phase 1 — monotonic revision of `name`. The relay only accepts a
+   *  name patch whose revision is strictly newer, so a reconnecting device
+   *  replaying an old patch cannot revert the label. */
+  name_rev?: number;
+  /** Plan 61 Phase 3 — `"control"` marks the supervisor gateway's `ctrl` room.
+   *  Chat rooms leave this absent. */
+  role?: string;
 }
 
 /** Control frame sent to relay (not routed to app peer). */
@@ -45,6 +63,11 @@ export interface RoomMetaUpdateFrame {
     model?: string;
     thinking?: string;
     working?: boolean;
+    /** Plan 61 Phase 1 — a rename is a metadata patch now, not a re-register.
+     *  Always send `name_rev` alongside so the relay can order competing
+     *  renames. */
+    name?: string;
+    name_rev?: number;
   };
 }
 

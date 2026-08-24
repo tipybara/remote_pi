@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Supervisor, decideFireAction, getSupervisorSockPath } from "./supervisor.js";
 import { addDaemon } from "./registry.js";
 import { readCronLog } from "./cron_log.js";
+import { createSession, setDesiredState } from "./sessions.js";
 import {
   encodeRequest,
   parseReply,
@@ -61,6 +62,11 @@ beforeEach(async () => {
     // which is harmless here — the spawning tests only check `started/restarted`
     // booleans, returned synchronously at spawn time.
     piBin: process.execPath,
+    // Plan 61 Phase 3 — no relay control plane under test. `start()` would
+    // otherwise try to load the machine keypair and open a real WebSocket:
+    // slow, network-dependent, and irrelevant to the UDS surface these tests
+    // cover. The gateway has its own tests in `gateway.test.ts`.
+    gateway: false,
   });
   await supervisor.start();
 });
@@ -293,5 +299,72 @@ describe("Supervisor — cron ops", () => {
   test("cron_run on an unknown job → ok:false", async () => {
     const r = await ask({ op: "cron_run", job_id: "j_unknown" });
     expect(r).toMatchObject({ ok: false });
+  });
+});
+
+
+// ── plan 61 Phase 3/4 — desired state survives a supervisor restart ─────────
+//
+// The daemon audit's "desired running: none" gap: `stop` was in-memory only, so
+// a supervisor restart `_spawnAllFromRegistry`'d everything back up and a
+// session the operator had deliberately stopped came back from the dead.
+
+describe("Supervisor — persisted desired state (plan 61)", () => {
+  let home: string;
+  let sv: Supervisor | null = null;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pi-sv-desired-"));
+    process.env["REMOTE_PI_HOME"] = home;
+  });
+
+  afterEach(async () => {
+    if (sv) { await sv.stop(); sv = null; }
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  async function boot(): Promise<Supervisor> {
+    const s = new Supervisor({
+      extensionPath: "/no/such/extension.js",
+      piBin: process.execPath,
+      gateway: false,
+    });
+    await s.start();
+    return s;
+  }
+
+  test("a workspace whose only session is desired:stopped is NOT spawned", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-stopped-"));
+    const { id } = addDaemon(dir);
+    const session = createSession({ workspaceId: id, now: 1 });
+    setDesiredState(session.session_id, "stopped", 2);
+
+    sv = await boot();
+    const list = await ask({ op: "list" }) as ControlReply<{ daemons: Array<{ id: string; state: string }> }>;
+    const entry = list.ok ? list.data!.daemons.find((d) => d.id === id) : undefined;
+    expect(entry?.state).toBe("stopped");
+  });
+
+  test("desired:running still spawns, and the child adopts the catalogued session id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-running-"));
+    const { id } = addDaemon(dir);
+    createSession({ workspaceId: id, now: 1 });
+
+    sv = await boot();
+    const list = await ask({ op: "list" }) as ControlReply<{ daemons: Array<{ id: string; state: string }> }>;
+    const entry = list.ok ? list.data!.daemons.find((d) => d.id === id) : undefined;
+    // The stub `pi` binary exits immediately, so the state is whatever the spawn
+    // left behind — the point is that a spawn was ATTEMPTED, unlike above.
+    expect(entry?.state).not.toBe("stopped");
+  });
+
+  test("a registered folder with NO catalogue entry keeps the historical always-start behaviour", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-plain-"));
+    const { id } = addDaemon(dir);
+
+    sv = await boot();
+    const list = await ask({ op: "list" }) as ControlReply<{ daemons: Array<{ id: string; state: string }> }>;
+    const entry = list.ok ? list.data!.daemons.find((d) => d.id === id) : undefined;
+    expect(entry?.state).not.toBe("stopped");
   });
 });

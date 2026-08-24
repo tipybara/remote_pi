@@ -195,6 +195,25 @@ export type ClientMessage =
   // broadcasts, compaction notice) still flow through the normal channels.
   | { type: "session_new"; id: string }
   | { type: "session_compact"; id: string }
+  /**
+   * Plan 61 Phase 2 — rename this session from the app.
+   *
+   * The label was app-local until now (a long-press "rename" that only ever
+   * touched the phone's own cache), so two devices of the same Owner disagreed
+   * about what a session was called and the Pi never knew at all. This makes
+   * the rename authoritative: the Pi applies it, persists it, and the relay
+   * fans the new name out to every device as a `room_meta_update` patch.
+   *
+   * `session_id` names the session being renamed — it must match this Pi's
+   * own id, so a frame that raced a session replacement is rejected rather
+   * than renaming whatever session happens to be current now.
+   *
+   * `rev` is the `name_rev` the app last saw. It is optimistic-concurrency,
+   * not the new revision: the Pi mints that. A `rev` older than what the Pi
+   * holds means the app is acting on a stale label and is refused, so the
+   * loser of a two-device race is told instead of silently clobbering.
+   */
+  | { type: "session_rename"; id: string; display_name: string; session_id?: string; rev?: number }
   | { type: "model_set"; id: string; provider: string; model_id: string }
   | { type: "thinking_set"; id: string; level: ThinkingLevel }
   | { type: "list_models"; id: string }
@@ -267,6 +286,34 @@ export type ServerMessage =
       session_name: string;
       session_started_at: number;
       room_id: string;
+      /**
+       * Plan 61 Phase 1 — the authoritative Pi session UUID. Equal to
+       * `room_id` from Phase 1 on. Absent when this Pi still keys its room by
+       * the legacy `sha256(cwd[,name])` derivation (older SDK, or the session
+       * id was not resolvable when the room opened), so the app must treat its
+       * presence — not its value — as the signal that a room id is stable
+       * across renames.
+       */
+      session_id?: string;
+      /**
+       * Plan 61 Phase 1 — canonical `realpath(cwd)` of the workspace this
+       * session runs in. Phase 2 groups Home by Device → Workspace → Session
+       * using this; symlinked paths are already collapsed.
+       */
+      workspace_path?: string;
+      /**
+       * Plan 61 Phase 1 — the session's editable label, mirroring
+       * `room_meta.name`. Named `display_name` here to make the split explicit:
+       * `session_name` is the historical field and callers still read it, but
+       * neither is identity (plan 61 D2).
+       */
+      display_name?: string;
+      /**
+       * Plan 61 Phase 1 — revision of `display_name`. Monotonic per machine;
+       * the app must ignore a name update whose revision is not newer than the
+       * one it already holds.
+       */
+      name_rev?: number;
       /**
        * Plan/27 Wave A: identifies the host coding agent driving this
        * pi-extension instance. `name` is hardcoded to "Pi coding agent"
@@ -347,7 +394,8 @@ export type ActionName =
   | "session_new"
   | "session_compact"
   | "model_set"
-  | "thinking_set";
+  | "thinking_set"
+  | "session_rename";
 
 /**
  * Plan/28 — Mirror of the SDK's `ThinkingLevel` (defined in

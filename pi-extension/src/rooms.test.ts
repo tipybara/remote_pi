@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { roomIdForCwd, roomIdFor } from "./rooms.js";
+import { canonicalWorkspacePath, isSessionRoomId, roomIdForCwd, roomIdFor, roomIdForSession } from "./rooms.js";
 import { defaultAgentName } from "./session/local_config.js";
 
 describe("roomIdForCwd", () => {
@@ -81,5 +81,70 @@ describe("roomIdFor (plan/41 — App↔Pi room per (cwd, name))", () => {
 
   test("scoped id is 12-char base64url", () => {
     expect(roomIdFor(cwd, "reviewer")).toMatch(/^[A-Za-z0-9_-]{12}$/);
+  });
+});
+
+describe("roomIdForSession (plan 61 Phase 1 — room_id == session_id)", () => {
+  const cwd = "/tmp/proj/backend";
+  const sessionId = "019ffb64-7c21-7a3f-9d2e-4b1c8a0f6e5d";
+
+  test("a usable session id IS the room id — verbatim, no hashing", () => {
+    expect(roomIdForSession(sessionId, cwd, "anything")).toBe(sessionId);
+  });
+
+  test("INVARIANT: renaming cannot change the room id", () => {
+    // The whole point of Phase 1. Under roomIdFor(cwd, name) these differ.
+    expect(roomIdForSession(sessionId, cwd, "before")).toBe(
+      roomIdForSession(sessionId, cwd, "after"),
+    );
+    expect(roomIdFor(cwd, "before")).not.toBe(roomIdFor(cwd, "after"));
+  });
+
+  test("two sessions in the SAME folder get distinct rooms without needing /name", () => {
+    expect(roomIdForSession("019ffb64-aaaa-7a3f-9d2e-4b1c8a0f6e5d", cwd)).not.toBe(
+      roomIdForSession("019ffb64-bbbb-7a3f-9d2e-4b1c8a0f6e5d", cwd),
+    );
+  });
+
+  test("falls back to the legacy (cwd, name) id when no session id is available", () => {
+    // The one-release alias: an already-paired app keeps talking to the id it
+    // knows instead of the room silently moving under it.
+    expect(roomIdForSession(undefined, cwd, "reviewer")).toBe(roomIdFor(cwd, "reviewer"));
+    expect(roomIdForSession(null, cwd)).toBe(roomIdForCwd(cwd));
+    expect(roomIdForSession("   ", cwd)).toBe(roomIdForCwd(cwd));
+  });
+
+  test("rejects ids that would corrupt a Hive box filename or a log line", () => {
+    // These end up in `msgs_<epk>__<roomId>` on the app. Silently sanitising
+    // would split one session's history across two boxes, so we fall back to
+    // the legacy id instead.
+    for (const bad of ["../escape", "has space", "has/slash", "sh:rt", "x".repeat(65), "short"]) {
+      expect(roomIdForSession(bad, cwd)).toBe(roomIdForCwd(cwd));
+    }
+  });
+
+  test("isSessionRoomId reports whether the room really is session-keyed", () => {
+    expect(isSessionRoomId(roomIdForSession(sessionId, cwd), sessionId)).toBe(true);
+    // Legacy fallback: the room id is a digest, not the session id.
+    expect(isSessionRoomId(roomIdForSession(undefined, cwd), sessionId)).toBe(false);
+    expect(isSessionRoomId("anything", undefined)).toBe(false);
+  });
+});
+
+describe("canonicalWorkspacePath (plan 61 Phase 1)", () => {
+  test("resolves symlinks so Phase 2 groups both paths under ONE workspace", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "remote-pi-ws-"));
+    const real = join(tmp, "real");
+    mkdirSync(real);
+    const link = join(tmp, "link");
+    symlinkSync(real, link);
+
+    expect(canonicalWorkspacePath(link)).toBe(canonicalWorkspacePath(real));
+    // And it agrees with what the legacy room id hashes.
+    expect(roomIdForCwd(link)).toBe(roomIdForCwd(canonicalWorkspacePath(link)));
+  });
+
+  test("a non-existent cwd falls back to the raw path (no throw)", () => {
+    expect(canonicalWorkspacePath("/no/such/path/anywhere/xyz")).toBe("/no/such/path/anywhere/xyz");
   });
 });

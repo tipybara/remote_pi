@@ -73,7 +73,7 @@ import {
   createExtensionUiBridge,
   type ExtensionUiBridge,
 } from "./extension_ui_bridge.js";
-import { roomIdFor } from "./rooms.js";
+import { canonicalWorkspacePath, roomIdFor, roomIdForSession } from "./rooms.js";
 import {
   handleSessionCompact,
   handleModelSet,
@@ -212,7 +212,79 @@ let _myRoomId: string | null = null;   // this Pi's room id (derived from cwd)
 // open instead of starting null. The SDK fires `thinking_level_select`
 // on every change (initial load + user toggle), mirrored to room_meta
 // the same way model is — apps subscribe to one channel for both.
-let _myRoomMeta: { name: string; cwd: string; model?: string; thinking?: ThinkingLevel; working?: boolean } | null = null;
+let _myRoomMeta: {
+  name: string;
+  cwd: string;
+  model?: string;
+  thinking?: ThinkingLevel;
+  working?: boolean;
+  session_id?: string;
+  workspace_path?: string;
+  name_rev?: number;
+} | null = null;
+
+/**
+ * Plan 61 Phase 1 — the Pi session UUID this process belongs to.
+ *
+ * `ExtensionContext.sessionManager` is only handed to us inside event/command
+ * callbacks, but `_cmdStart` (which needs the id to key the relay room) can run
+ * from a control frame with no session ctx at all. So we latch the id the first
+ * time any ctx carries one and keep it for the process's lifetime; a session
+ * REPLACEMENT (`session_start`) overwrites it, which is correct — that is a
+ * different session and deserves a different room.
+ */
+let _myPiSessionId: string | null = null;
+
+/**
+ * Latch the Pi session id from any ctx that happens to carry a sessionManager.
+ *
+ * Defensive by necessity: the SDK marks a captured ctx STALE after a session
+ * replacement, and merely *reading* `ctx.sessionManager` on a stale ctx throws.
+ * `_cmdStart` runs from control frames that may carry exactly such a ctx, so a
+ * throw here would take the whole relay connect down. A failed read simply
+ * means "no fresher id available" — keep whatever we already latched.
+ */
+function _rememberPiSessionId(
+  ctx: { sessionManager?: { getSessionId?: () => string | undefined } } | null | undefined,
+): string | null {
+  try {
+    const id = ctx?.sessionManager?.getSessionId?.()?.trim();
+    if (id) _myPiSessionId = id;
+  } catch { /* stale ctx — keep the previously latched id */ }
+  return _myPiSessionId;
+}
+
+function _resolvePiSessionId(): string | null {
+  // Plan 61 Phase 3 — a supervisor-spawned daemon is handed its session
+  // identity, and that identity WINS over the SDK's own session id.
+  //
+  // It has to: the machine mints the id in `sessions.json` before the process
+  // exists, so the phone has something concrete to wait on. It is also the more
+  // stable of the two for a daemon — the SDK's id rolls over whenever
+  // `--continue` cannot resume or a `session_new` recycles the process, either
+  // of which would re-key the relay room and orphan the conversation.
+  const injected = process.env["REMOTE_PI_SESSION_ID"]?.trim();
+  if (injected) return injected;
+  if (_myPiSessionId) return _myPiSessionId;
+  return _rememberPiSessionId(
+    _lastEventCtx as { sessionManager?: { getSessionId?: () => string | undefined } } | null,
+  );
+}
+
+/**
+ * Plan 61 Phase 1 — monotonic revision for the display-name patch.
+ *
+ * Seeded from the wall clock so it keeps increasing across process restarts
+ * (a fresh counter starting at 1 would lose to the revision the relay already
+ * holds, and the rename would be silently rejected). Two renames inside the
+ * same millisecond still get distinct, increasing values.
+ */
+let _nameRev = 0;
+function _nextNameRev(): number {
+  const now = Date.now();
+  _nameRev = now > _nameRev ? now : _nameRev + 1;
+  return _nameRev;
+}
 let _currentModel: string | undefined = undefined;  // last-known model name
 let _currentThinking: ThinkingLevel | undefined = undefined;  // last-known thinking level
 
@@ -271,18 +343,31 @@ function _setCurrentModel(name: string): void {
 
 let _explicitSessionRenameTarget: string | null = null;
 
-async function _publishSessionDisplayName(name: string): Promise<void> {
+/**
+ * Plan 61 Phase 1 — publish a new display name as room METADATA.
+ *
+ * This used to tear the relay down (`_goIdle` + `_cmdStart`) because the room
+ * id was `roomIdFor(cwd, name)`: the only way to publish a rename was to
+ * re-register under the new derived id. The cost was severe — the app received
+ * `room_ended` for the old room and `room_announced` for a new one, so a rename
+ * produced a SECOND tile and orphaned the Hive box holding the conversation,
+ * while the in-flight WS (and any streaming turn on it) was dropped.
+ *
+ * Now `room_id == session_id` and the name is a patch guarded by a monotonic
+ * revision. Nothing about the transport moves.
+ */
+function _publishSessionDisplayName(name: string): void {
   if (_myRoomMeta?.name === name) return;
-  if (_state === "idle" || _disposed) {
-    if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, name };
-    return;
+  const rev = _nextNameRev();
+  if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, name, name_rev: rev };
+  if (_state === "idle" || _disposed) return;
+  if (_relay && _myRoomId) {
+    _relay.sendControl({
+      type: "room_meta_update",
+      room_id: _myRoomId,
+      meta: { name, name_rev: rev },
+    });
   }
-
-  // Session-info callbacks may belong to the outgoing runner by the time the
-  // async relay restart continues. Room identity only needs process cwd + a
-  // safe notification sink, so never carry a session-bound ctx across it.
-  _goIdle("peer_stop");
-  if (!_disposed) await _cmdStart(_controlCtx());
 }
 
 /**
@@ -1117,6 +1202,29 @@ export function _getActivePeerCountForTest(): number {
   return _activePeers.size;
 }
 
+/**
+ * Test-only: the relay room id this process registered under. Plan 61 Phase 1
+ * makes this equal to the Pi session id, so tests can assert that a rename
+ * leaves it untouched.
+ */
+export function _getRoomIdForTest(): string | null {
+  return _myRoomId;
+}
+
+/** Test-only: the latched Pi session id (plan 61 Phase 1). */
+export function _getPiSessionIdForTest(): string | null {
+  return _myPiSessionId;
+}
+
+/**
+ * Test-only: clear the latched Pi session id. Module state survives between
+ * tests in the same file, and a leaked id would silently re-key the relay room
+ * of every later test that expects the legacy cwd-derived id.
+ */
+export function _resetPiSessionIdForTest(): void {
+  _myPiSessionId = null;
+}
+
 /** Test-only: true if a specific peer (base64 std) has an attached channel. */
 export function _hasActivePeerForTest(appPeerIdStd: string): boolean {
   return _activePeers.has(appPeerIdStd);
@@ -1198,7 +1306,7 @@ function _ensureDefaultPiSessionName(
   if (currentName && reason !== "fork") return currentName;
 
   const cwd = ctx.cwd;
-  const sessionId = ctx.sessionManager?.getSessionId();
+  const sessionId = _rememberPiSessionId(ctx) ?? ctx.sessionManager?.getSessionId();
   const setSessionName = (pi as unknown as { setSessionName?: (name: string) => void })
     .setSessionName;
   if (!cwd || !sessionId || !setSessionName) return currentName;
@@ -1610,30 +1718,48 @@ export async function _handleControl(cmd: string): Promise<void> {
   }
 }
 
-/** Rename session live; cycle Relay so room follows Pi display name. */
+/**
+ * Rename the session. **Metadata only** — plan 61 Phase 1.
+ *
+ * The relay room is NOT cycled any more. It used to be, because `room_id` was
+ * derived from the display name: publishing a rename meant re-registering under
+ * a different id, which cost the app its tile and its history and killed any
+ * in-flight turn on the socket. `room_id == session_id` now, so the label is
+ * pure metadata and travels as a `room_meta_update` patch.
+ *
+ * Still `async` so the command handlers and `/name` callers keep their shape.
+ */
 async function _renameAgent(newName: string): Promise<void> {
   if (!newName) return;  // empty rename → no-op
-  const ctx = _controlCtx();
   const cwd = process.cwd();
   _explicitSessionRenameTarget = newName;
   (_pi as { setSessionName?: (name: string) => void } | null)
     ?.setSessionName?.(newName);
   saveLocalConfig(cwd, { agent_name: newName });
 
-  const wasStarted = _getState() !== "idle";
-  if (wasStarted) {
-    _goIdle("peer_stop");
-    if (!_disposed) await _cmdStart(ctx);
-  }
-
-  const displayName = _displayName(cwd);
+  // What the SDK reports back after `setSessionName`. It CAN differ from what
+  // was asked: a host may normalise the label, and a host with no
+  // `setSessionName` at all still reports the previous one.
+  const assigned = _displayName(cwd);
+  // Publish the REQUESTED name, not the read-back.
+  //
+  // We cannot distinguish "the host normalised it" from "the host ignored the
+  // setter", and publishing the read-back in the second case would ack a
+  // rename that never happened — the app would optimistically show the new
+  // label, then get patched straight back to the old one. `newName` is also
+  // what we just persisted to the local config, so this keeps the published
+  // metadata and the on-disk record in agreement.
+  _publishSessionDisplayName(newName);
   _safePiSendMessage({
     customType: "remote-pi:name-assigned",
-    content: `Session name: ${displayName}`,
+    content: `Session name: ${newName}`,
     details: {
-      requested: displayName,
-      assigned: displayName,
-      changed: false,
+      requested: newName,
+      assigned,
+      // Honest now (was hardcoded `false`): true when the host handed back
+      // something other than what we asked for, so a normalising host can be
+      // noticed instead of silently disagreeing with the published label.
+      changed: assigned !== newName,
     },
     display: false,
   });
@@ -1900,7 +2026,14 @@ async function _handlePairRequest(
     // to roomIdFor(cwd, name) covers the edge case where pair_request lands
     // before _cmdStart could set _myRoomId (shouldn't happen in practice) —
     // and stays plan/41-consistent (same (cwd, name) derivation as the announce).
-    room_id: _myRoomId ?? roomIdFor(cwd, sessionName),
+    room_id: _myRoomId ?? roomIdForSession(_resolvePiSessionId(), cwd, sessionName),
+    // Plan 61 Phase 1 — the same session identity the hello publishes, so a
+    // freshly-paired app can key by session from its very first frame instead
+    // of waiting for the next `room_announced`.
+    ...(_myRoomMeta?.session_id ? { session_id: _myRoomMeta.session_id } : {}),
+    workspace_path: _myRoomMeta?.workspace_path ?? canonicalWorkspacePath(cwd),
+    display_name: sessionName,
+    ...(_myRoomMeta?.name_rev !== undefined ? { name_rev: _myRoomMeta.name_rev } : {}),
     // Plan/27 Wave A — surface the host coding-agent identity + machine
     // hostname so the app can render a meaningful device row (and tell
     // two PCs apart even when nicknames collide).
@@ -2065,7 +2198,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       return;
     }
     _explicitSessionRenameTarget = null;
-    void _publishSessionDisplayName(name);
+    _publishSessionDisplayName(name);
   });
 
   pi.on("message_start", (event) => {
@@ -2223,8 +2356,12 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // bound to the current session.
   pi.on("session_start", (event, ctx) => {
     _lastEventCtx = ctx;
+    // Plan 61 Phase 1 — latch the session UUID that keys this process's relay
+    // room. `session_start` fires for startup/new/fork/reload/resume, so this
+    // is the earliest and most reliable point at which the id exists.
+    _rememberPiSessionId(ctx);
     const displayName = _ensureDefaultPiSessionName(pi, event.reason, ctx);
-    if (displayName) void _publishSessionDisplayName(displayName);
+    if (displayName) _publishSessionDisplayName(displayName);
     if (!_pi) _pi = pi;
     // session_shutdown disposes per-session pi-ask subscriptions. A host that
     // reuses this module instance does NOT re-run the factory, so rebind the
@@ -2328,6 +2465,12 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // (issue #55). session_start re-binds `_lastEventCtx` for the new session.
     _lastCtx = null;
     _lastEventCtx = null;
+    // Plan 61 Phase 1 — drop the latched session id for the same reason we drop
+    // the ctxs: on a module-reuse host this instance outlives the session, and
+    // a `_cmdStart` arriving from a control frame between shutdown and the next
+    // `session_start` would otherwise key the relay room by a session that no
+    // longer exists. `session_start` re-latches before any reconnect.
+    _myPiSessionId = null;
     _pi = null;
     // No bye reason: replacement reopens same relay room without offline flap.
     if (_state !== "idle") _goIdle();
@@ -2403,7 +2546,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   pi.registerCommand("remote-pi stop",     { description: "Disconnect relay for this Pi process", handler: async (_, ctx) => { _lastCtx = ctx; await _cmdStop(ctx); } });
   pi.registerCommand("remote-pi pair",     { description: "Show a QR code to pair a new mobile device (optional: --ttl <seconds>)", handler: async (args, ctx) => { _lastCtx = ctx; await _cmdPair(ctx, args.trim()); } });
   pi.registerCommand("remote-pi devices",  { description: "List paired mobile devices", handler: async (_, ctx) => { _lastCtx = ctx; await _cmdList(ctx); } });
-  pi.registerCommand("remote-pi rename",  { description: "Rename this Pi session and restart its relay room", handler: async (args, ctx) => { _lastCtx = ctx; await _renameAgent(args.trim()); } });
+  pi.registerCommand("remote-pi rename",  { description: "Rename this Pi session (label only — the relay room is unaffected)", handler: async (args, ctx) => { _lastCtx = ctx; await _renameAgent(args.trim()); } });
   pi.registerCommand("remote-pi revoke", {
     description: "Revoke a paired device by its shortid",
     getArgumentCompletions: async (prefix) => _shortidCompletions(prefix),
@@ -2667,12 +2810,16 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   // Same name we send in pair_ok — keeps room_meta.name and the per-pair
   // session_name aligned so the app shows consistent labels.
   const sessionName = _displayName(cwd);
-  // plan/41: derive the App↔Pi room from (cwd, name) so several agents in the
-  // SAME folder get distinct rooms (the app renders one tile per agent). The
-  // default/unnamed case preserves the legacy cwd-only id (no re-keying). Uses
-  // the SAME name as room_meta.name / pair_ok below — the invariant that the
-  // app pairs on the room the Pi actually announces.
-  const roomId = roomIdFor(cwd, sessionName);
+  // plan 61 Phase 1: the App↔Pi room IS the Pi session id. That makes the
+  // transport key immune to `/name` (the old `roomIdFor(cwd, name)` derivation
+  // re-keyed the room on every rename) and gives several agents in the SAME
+  // folder distinct rooms for free — they are distinct sessions.
+  //
+  // `roomIdForSession` falls back to the legacy `(cwd, name)` derivation when
+  // the session id is not resolvable, which keeps an already-paired app talking
+  // to the id it knows during the one-release alias window.
+  const piSessionId = _resolvePiSessionId();
+  const roomId = roomIdForSession(piSessionId, cwd, sessionName);
 
   // Seed the current model from the SDK's resolved selection so room_meta
   // carries it on connect. `model_select` only fires on an explicit set/cycle
@@ -2717,7 +2864,27 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
     _currentThinking = _pi?.getThinkingLevel() as ThinkingLevel | undefined;
   } catch { /* defensive — never block /remote-pi start on this */ }
 
-  const roomMeta: { name: string; cwd: string; model?: string; thinking?: ThinkingLevel } = { name: sessionName, cwd };
+  // plan 61 Phase 1 — publish the session identity alongside the label.
+  //   session_id     lets the app tell a session-keyed room from a legacy one
+  //   workspace_path is what Phase 2 groups sessions by (Device → Workspace)
+  //   name_rev       orders later rename patches against this initial name
+  const roomMeta: {
+    name: string;
+    cwd: string;
+    model?: string;
+    thinking?: ThinkingLevel;
+    session_id?: string;
+    workspace_path?: string;
+    name_rev?: number;
+  } = {
+    name: sessionName,
+    cwd,
+    workspace_path: canonicalWorkspacePath(cwd),
+    name_rev: _nextNameRev(),
+  };
+  // Only claim `session_id` when the room really is keyed by it — a legacy
+  // fallback room must not advertise an identity it does not use.
+  if (piSessionId && roomId === piSessionId) roomMeta.session_id = piSessionId;
   const modelName = _currentModelName();
   if (modelName) roomMeta.model = modelName;
   if (_currentThinking) roomMeta.thinking = _currentThinking;
@@ -3956,6 +4123,64 @@ export function _routeClientMessageFrom(
       // session_start has landed yet (keeps the pre-replacement happy path).
       handleSessionCompact((_lastEventCtx ?? _lastCtx) as ActionCtx | null, sender, msg);
       break;
+    // Plan 61 Phase 2 — an app-driven rename. Metadata only, like every other
+    // rename path since Phase 1: no relay cycling, no new room id.
+    case "session_rename": {
+      const requested = typeof msg.display_name === "string"
+        ? msg.display_name.trim()
+        : "";
+      if (!requested) {
+        sender.send({
+          type: "action_error",
+          in_reply_to: msg.id,
+          action: "session_rename",
+          error: "display_name must be a non-empty string",
+        });
+        break;
+      }
+      // Guard against renaming the WRONG session: a frame can be in flight
+      // while the Pi replaces its session (`/new`, fork, reload), and applying
+      // it afterwards would relabel a session the user never touched.
+      const mySessionId = _resolvePiSessionId();
+      if (msg.session_id && mySessionId && msg.session_id !== mySessionId) {
+        sender.send({
+          type: "action_error",
+          in_reply_to: msg.id,
+          action: "session_rename",
+          error: "session_id does not match this session",
+        });
+        break;
+      }
+      // Optimistic concurrency: `rev` is the revision the APP last saw. If the
+      // Pi already holds a newer one, another device renamed in the meantime
+      // and this request is acting on a stale label — refuse instead of
+      // silently overwriting. The relay's own `name_rev` gate would drop the
+      // resulting patch anyway; failing here makes the loser aware.
+      const currentRev = _myRoomMeta?.name_rev;
+      if (
+        typeof msg.rev === "number"
+        && typeof currentRev === "number"
+        && msg.rev < currentRev
+      ) {
+        sender.send({
+          type: "action_error",
+          in_reply_to: msg.id,
+          action: "session_rename",
+          error: "stale name revision — this session was renamed elsewhere",
+        });
+        break;
+      }
+      void _renameAgent(requested).then(
+        () => sender.send({ type: "action_ok", in_reply_to: msg.id, action: "session_rename" }),
+        (err: unknown) => sender.send({
+          type: "action_error",
+          in_reply_to: msg.id,
+          action: "session_rename",
+          error: String(err),
+        }),
+      );
+      break;
+    }
     case "session_new": {
       const actionCtx = _lastCtx as ActionCtx | null;
       const daemonMode = process.env["REMOTE_PI_DAEMON"] === "1";
