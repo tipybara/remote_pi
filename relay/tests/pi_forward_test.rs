@@ -65,6 +65,10 @@ fn test_registry() -> PeerRegistry {
 fn test_room_meta() -> RoomMeta {
     RoomMeta {
         room_id: "main".to_string(),
+        session_id: None,
+        workspace_path: None,
+        name_rev: None,
+        role: None,
         name: None,
         cwd: None,
         model: None,

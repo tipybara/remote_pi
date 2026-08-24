@@ -36,23 +36,48 @@ async fn two_peers_route_message() {
     assert_eq!(received_json["ct"], ct, "ct must be forwarded unchanged");
 }
 
-/// Sending to an unknown peer ID is silently dropped; the sender's connection stays alive.
+/// Plan 61 Phase 3 — sending to an unknown `(peer, room)` now answers the
+/// sender with `transport_error: offline` instead of dropping in silence.
+///
+/// This replaces `dest_offline_drops_silently`. The silent drop meant the app
+/// had no way to tell "the Pi is gone" from "the Pi is slow": the optimistic
+/// bubble just vanished ~20 s later when the no-echo timer swept it. Only the
+/// Pi→Pi `pi_envelope` path ever reported a transport error.
+///
+/// The connection must stay alive — this is a per-message failure, not a
+/// protocol violation.
 #[tokio::test]
-async fn dest_offline_drops_silently() {
+async fn dest_offline_answers_transport_error() {
     let port = start_relay().await;
     let (mut ws_a, _) = connect_and_auth(port).await;
 
     let envelope = json!({"peer": "bm9uZXhpc3RlbnRwZWVy", "ct": "aGVsbG8="}).to_string();
+    ws_a.send(Message::text(envelope.clone())).await.unwrap();
+
+    let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), ws_a.next())
+        .await
+        .expect("relay must answer a dest-miss, not stay silent")
+        .expect("stream must stay open")
+        .unwrap();
+    let frame: serde_json::Value = serde_json::from_str(received.to_text().unwrap()).unwrap();
+
+    assert_eq!(frame["type"], "transport_error");
+    assert_eq!(frame["reason"], "offline");
+    assert_eq!(frame["peer"], "bm9uZXhpc3RlbnRwZWVy");
+    // The envelope omitted `room`, so the relay defaulted it to "main" and
+    // the error must name the room it actually tried to reach.
+    assert_eq!(frame["room_id"], "main");
+
+    // Connection survives: a second send still reaches the relay and gets its
+    // own error rather than a close.
     ws_a.send(Message::text(envelope)).await.unwrap();
-
-    // If the relay silently drops it, no message arrives and no close frame is sent.
-    let result = tokio::time::timeout(tokio::time::Duration::from_millis(200), ws_a.next()).await;
-
-    assert!(
-        result.is_err(),
-        "expected no message (connection alive), got {:?}",
-        result
-    );
+    let again = tokio::time::timeout(tokio::time::Duration::from_millis(500), ws_a.next())
+        .await
+        .expect("connection must stay usable after a transport_error")
+        .expect("stream must stay open")
+        .unwrap();
+    let frame2: serde_json::Value = serde_json::from_str(again.to_text().unwrap()).unwrap();
+    assert_eq!(frame2["type"], "transport_error");
 }
 
 /// A client that sends an invalid signature must have its WS closed within 100 ms.

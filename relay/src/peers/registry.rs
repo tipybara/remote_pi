@@ -287,11 +287,28 @@ impl PeerRegistry {
         room_id: &str,
         patch: RoomMetaPatch,
     ) -> bool {
-        let (current_model, current_thinking, current_working) = {
+        let (current_model, current_thinking, current_working, current_name, current_name_rev) = {
             let mut lock = self.senders.lock().unwrap();
             let key = (peer_id.to_string(), room_id.to_string());
             match lock.get_mut(&key) {
                 Some(v) if !v.is_empty() => {
+                    // Plan 61 Phase 1 — the name patch is revision-gated, and
+                    // the decision is made ONCE (against the head conn's
+                    // stored revision) so every conn at this key ends up with
+                    // the same value. Deciding per-conn would let conns that
+                    // registered at different times disagree.
+                    //
+                    // Accept when: no revision was supplied, or nothing is
+                    // stored yet, or the incoming revision is strictly newer.
+                    // Reject a stale/equal revision — that is a replayed patch
+                    // from a reconnecting device, and applying it would flip
+                    // the label back to an older name.
+                    let stored_rev = v.first().and_then(|(_, m, _)| m.name_rev);
+                    let name_accepted = match (patch.name.as_ref(), patch.name_rev, stored_rev) {
+                        (None, _, _) => false,
+                        (Some(_), Some(incoming), Some(stored)) => incoming > stored,
+                        (Some(_), _, _) => true,
+                    };
                     for (_, meta, _) in v.iter_mut() {
                         if let Some(ref m) = patch.model {
                             meta.model = m.clone();
@@ -302,6 +319,14 @@ impl PeerRegistry {
                         if let Some(w) = patch.working {
                             meta.working = w;
                         }
+                        if name_accepted
+                            && let Some(ref n) = patch.name
+                        {
+                            meta.name = n.clone();
+                            if let Some(rev) = patch.name_rev {
+                                meta.name_rev = Some(rev);
+                            }
+                        }
                     }
                     // All conns at this key carry the same post-patch state
                     // now; read the first as the canonical snapshot.
@@ -310,6 +335,8 @@ impl PeerRegistry {
                         head.1.model.clone(),
                         head.1.thinking.clone(),
                         head.1.working,
+                        head.1.name.clone(),
+                        head.1.name_rev,
                     )
                 }
                 _ => return false,
@@ -336,6 +363,16 @@ impl PeerRegistry {
                 "working".to_string(),
                 serde_json::Value::Bool(current_working),
             );
+            // Plan 61 Phase 1 — the post-patch name rides along whenever the
+            // room has one. A rejected (stale-revision) name patch therefore
+            // still broadcasts the CURRENT name, which is what re-syncs the
+            // device that sent the stale patch.
+            if let Some(n) = &current_name {
+                meta_obj.insert("name".to_string(), serde_json::Value::String(n.clone()));
+            }
+            if let Some(rev) = current_name_rev {
+                meta_obj.insert("name_rev".to_string(), serde_json::Value::from(rev));
+            }
             let msg = serde_json::json!({
                 "type": "room_meta_updated",
                 "peer": peer_id,
@@ -395,6 +432,10 @@ mod tests {
     fn make_meta(room_id: &str) -> RoomMeta {
         RoomMeta {
             room_id: room_id.into(),
+            session_id: None,
+            workspace_path: None,
+            name_rev: None,
+            role: None,
             name: None,
             cwd: None,
             model: None,
@@ -714,6 +755,208 @@ mod tests {
         assert_eq!(
             v["meta"]["working"], true,
             "absent `working` in a patch must not clear it"
+        );
+    }
+
+    // ── plan 61 Phase 1 — the display name is a patch ────────────────────
+    //
+    // Before this, `name` could only be set in `hello`, so a `/name` forced
+    // the Pi to drop its WS and re-register under a different
+    // `roomIdFor(cwd, name)`: the app saw `room_ended` + a new tile and the
+    // history was orphaned. A rename must move no ids.
+
+    /// A name patch is applied and broadcast to room subscribers.
+    #[tokio::test]
+    async fn name_patch_broadcasts_new_name() {
+        let (reg, pi, mut rx_app) = meta_fixture().await;
+
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    name: Some(Some("refactor".into())),
+                    name_rev: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+
+        let v = recv_meta(&mut rx_app);
+        assert_eq!(v["meta"]["name"], "refactor");
+        assert_eq!(v["meta"]["name_rev"], 1);
+        // The room id is untouched — that is the whole point.
+        assert_eq!(v["room_id"], "main");
+        assert_eq!(
+            reg.rooms_of(&pi)[0].name.as_deref(),
+            Some("refactor"),
+            "the stored meta must carry the new name for later rooms_check"
+        );
+    }
+
+    /// A newer revision wins.
+    #[tokio::test]
+    async fn higher_name_rev_replaces_the_name() {
+        let (reg, pi, mut rx_app) = meta_fixture().await;
+
+        for (name, rev) in [("first", 1), ("second", 2)] {
+            assert!(
+                reg.update_room_meta(
+                    &pi,
+                    "main",
+                    RoomMetaPatch {
+                        name: Some(Some(name.into())),
+                        name_rev: Some(rev),
+                        ..Default::default()
+                    },
+                )
+                .await
+            );
+            let _ = recv_meta(&mut rx_app);
+        }
+
+        assert_eq!(reg.rooms_of(&pi)[0].name.as_deref(), Some("second"));
+        assert_eq!(reg.rooms_of(&pi)[0].name_rev, Some(2));
+    }
+
+    /// A stale (lower or equal) revision is REJECTED, and the broadcast
+    /// re-states the current name so the device that replayed it re-syncs.
+    /// Without this, a reconnecting second device could flip the label back.
+    #[tokio::test]
+    async fn stale_name_rev_is_rejected_but_still_resyncs() {
+        let (reg, pi, mut rx_app) = meta_fixture().await;
+
+        let _ = reg
+            .update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    name: Some(Some("current".into())),
+                    name_rev: Some(5),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let _ = recv_meta(&mut rx_app);
+
+        // Replayed patch from a lagging device.
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    name: Some(Some("stale".into())),
+                    name_rev: Some(3),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+
+        assert_eq!(reg.rooms_of(&pi)[0].name.as_deref(), Some("current"));
+        let v = recv_meta(&mut rx_app);
+        assert_eq!(
+            v["meta"]["name"], "current",
+            "the broadcast must carry the winning name, not the rejected one"
+        );
+
+        // Equal revision is also rejected (strictly-greater rule).
+        let _ = reg
+            .update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    name: Some(Some("equal".into())),
+                    name_rev: Some(5),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert_eq!(reg.rooms_of(&pi)[0].name.as_deref(), Some("current"));
+    }
+
+    /// A name patch with NO revision is accepted (legacy / best-effort
+    /// client), and so is the first one against a room that has no stored
+    /// revision yet.
+    #[tokio::test]
+    async fn name_patch_without_rev_is_accepted() {
+        let (reg, pi, mut rx_app) = meta_fixture().await;
+
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    name: Some(Some("no-rev".into())),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+        let v = recv_meta(&mut rx_app);
+        assert_eq!(v["meta"]["name"], "no-rev");
+        assert!(
+            v["meta"].get("name_rev").is_none(),
+            "no revision stored → none broadcast"
+        );
+    }
+
+    /// A patch that omits `name` must not clear an existing one, and a
+    /// revision on its own is not a patch at all.
+    #[tokio::test]
+    async fn absent_name_is_preserved_and_bare_rev_is_empty() {
+        let (reg, pi, mut rx_app) = meta_fixture().await;
+
+        let _ = reg
+            .update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    name: Some(Some("keep-me".into())),
+                    name_rev: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let _ = recv_meta(&mut rx_app);
+
+        // Model-only patch → name survives and rides along in the broadcast.
+        let _ = reg
+            .update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    model: Some(Some("opus".into())),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let v = recv_meta(&mut rx_app);
+        assert_eq!(v["meta"]["name"], "keep-me");
+
+        // A bare `name_rev` carries no state — no broadcast at all.
+        assert!(
+            RoomMetaPatch {
+                name_rev: Some(9),
+                ..Default::default()
+            }
+            .is_empty()
+        );
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    name_rev: Some(9),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+        assert!(
+            rx_app.try_recv().is_err(),
+            "an empty patch must not broadcast"
         );
     }
 }

@@ -110,12 +110,43 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
             .and_then(|m| m.get("working"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        // ── plan 61 Phase 1 — session identity carried in the hello ──
+        //
+        // All three are opaque to the relay; it stores and re-broadcasts
+        // them so the app can key by session instead of by (cwd, name).
+        // A pre-Phase-1 Pi omits them and everything below stays `None`,
+        // which is exactly the legacy behaviour.
+        let session_id = room_meta_val
+            .and_then(|m| m.get("session_id"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let workspace_path = room_meta_val
+            .and_then(|m| m.get("workspace_path"))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            // Legacy Pis only send `cwd`; it holds the same canonical
+            // realpath, so treat it as the workspace key rather than
+            // leaving Phase 2's grouping blind.
+            .or_else(|| cwd.clone());
+        let name_rev = room_meta_val
+            .and_then(|m| m.get("name_rev"))
+            .and_then(|v| v.as_i64());
+        // plan 61 Phase 3 — `role: "control"` marks the supervisor gateway's
+        // `ctrl` room so the app can skip it when rendering chat tiles.
+        let role = room_meta_val
+            .and_then(|m| m.get("role"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let started_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
         RoomMeta {
             room_id,
+            session_id,
+            workspace_path,
+            name_rev,
+            role,
             name,
             cwd,
             model,
@@ -283,10 +314,22 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                     let working_patch = meta_obj
                                         .and_then(|m| m.get("working"))
                                         .and_then(|v| v.as_bool());
+                                    // plan 61 Phase 1 — a rename is now a
+                                    // patch. `name_rev` (when present) orders
+                                    // competing renames; see
+                                    // `RoomMeta::name_rev`.
+                                    let name_patch = meta_obj
+                                        .and_then(|m| m.get("name"))
+                                        .map(|v| v.as_str().map(String::from));
+                                    let name_rev_patch = meta_obj
+                                        .and_then(|m| m.get("name_rev"))
+                                        .and_then(|v| v.as_i64());
                                     let patch = RoomMetaPatch {
                                         model: model_patch,
                                         thinking: thinking_patch,
                                         working: working_patch,
+                                        name: name_patch,
+                                        name_rev: name_rev_patch,
                                     };
                                     if !registry
                                         .update_room_meta(&peer_id, &target_room, patch)
@@ -368,6 +411,32 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                         bytes = ct_len,
                                         "dest (peer, room) not found, dropping",
                                     );
+                                    // plan 61 Phase 3 — tell the sender.
+                                    //
+                                    // App↔Pi used to fail COMPLETELY silently:
+                                    // the app kept an optimistic bubble until a
+                                    // ~20 s no-echo timeout swept it away, with
+                                    // no way to distinguish "the Pi is gone"
+                                    // from "the Pi is slow". Only the Pi→Pi
+                                    // `pi_envelope` path had a transport error.
+                                    //
+                                    // The outer envelope carries no message id
+                                    // (peer/room/ct only) and `ct` is opaque, so
+                                    // the relay cannot correlate to a single
+                                    // message nor synthesize an inner body. The
+                                    // error is therefore a CONTROL frame scoped
+                                    // to the destination: the client fails the
+                                    // sends outstanding for that (peer, room).
+                                    let err = serde_json::json!({
+                                        "type": "transport_error",
+                                        "reason": "offline",
+                                        "peer": dest_peer,
+                                        "room_id": dest_room,
+                                    })
+                                    .to_string();
+                                    if sink.send(Message::Text(err)).await.is_err() {
+                                        break;
+                                    }
                                 }
                             }
                         }
