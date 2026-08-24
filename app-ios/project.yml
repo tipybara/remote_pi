@@ -1,0 +1,101 @@
+# xcodegen spec for the native iOS client.
+#
+# Regenerate with:  xcodegen generate --spec project.yml
+#
+# `RemotePi.xcodeproj` is NOT checked in — this file is the source of truth, so
+# a merge conflict is a three-line diff here instead of an unreadable pbxproj.
+#
+# The app target is deliberately thin: it owns SwiftUI views and app lifecycle
+# and nothing else. Everything testable lives in the RemotePiKit package, which
+# builds and tests with plain `swift test` and no simulator.
+
+name: RemotePi
+
+options:
+  bundleIdPrefix: work.jacobmoura.remotepi
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+# The local SwiftPM package lives in this same directory (Package.swift next to
+# this file), so the path is `.`.
+packages:
+  RemotePiKit:
+    path: .
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    # Matches the Flutter app's target, so a device that runs one runs the other.
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  RemotePi:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/Sources
+    dependencies:
+      - package: RemotePiKit
+        product: RemotePiKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: work.jacobmoura.remotepi.native
+        PRODUCT_NAME: RemotePi
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # No signing team here — CI builds for the simulator, and a developer
+        # sets their own team locally rather than committing one.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ENABLE_PREVIEWS: YES
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Remote Pi
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Background modes are deliberately NOT declared. The relay has no
+        # offline queue, so a backgrounded app has nothing to keep alive; push
+        # is the answer if we ever need one, not a long-lived socket.
+        ITSAppUsesNonExemptEncryption: false
+
+        # ── Purpose strings ────────────────────────────────────────────────
+        # Every one of these is load-bearing: iOS kills the app on first use of
+        # the capability if the key is missing, and the crash names the key, so
+        # keep the wording accurate rather than generic.
+        NSCameraUsageDescription:
+          Remote Pi uses the camera to scan the pairing QR code shown by the Pi
+          extension on your Mac.
+        NSMicrophoneUsageDescription:
+          Remote Pi uses the microphone so you can dictate messages to your
+          coding agent instead of typing them.
+        NSSpeechRecognitionUsageDescription:
+          Remote Pi transcribes your dictation on device so it can send the text
+          to your coding agent.
+        NSPhotoLibraryUsageDescription:
+          Remote Pi attaches images from your photo library to messages you send
+          to your coding agent.
+        NSPhotoLibraryAddUsageDescription:
+          Remote Pi saves images your coding agent produces back to your photo
+          library.
