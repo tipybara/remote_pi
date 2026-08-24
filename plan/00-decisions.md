@@ -6,6 +6,23 @@ Numeração `00-` é proposital: este arquivo carrega antes dos planos numerados
 
 ---
 
+## Reopened 2026-08-24 — plan 61
+
+Evidence: `review/61-audit-*.md`. Executable plan: `plan/61-stable-session-identity.md`.
+
+These older rows are **no longer the working rule** for the mobile product:
+
+| Old decision | Now |
+|---|---|
+| **Sem daemon no MVP** | Supervisor is the machine control plane. Phone create/start/stop requires `remote-pi install`. |
+| **Relay stateless / no persistence** | Still true for chat rooms. Membership SQLite stays. Do **not** put the session catalog on Relay. |
+| Plan 41: `room_id = hash(cwd, name)` | Phase 1: `room_id = session_id`. Name is metadata. |
+| Plan 41: App will not group by cwd | Phase 2: Home is Device → Workspace → Session. Workspace is **not** a primary key. |
+| Plan 17 D9 / rename restarts room | Rename must not change `room_id` or restart Relay. |
+| Local / cross-PC agent mesh | Deleted in this fork. Do not restore. |
+
+---
+
 ## Origin / posicionamento
 
 - **Alvo do produto**: ataque o [Pi coding agent](https://github.com/earendil-works/pi). Não Claude Code (já tem Remote Control oficial), não OpenCode (já tem 5+ apps mobile community), não Goose/Aider (mercado pequeno).
