@@ -24,6 +24,13 @@ import RemotePiSession
 extension AppModel: HomeBackend {
     var isBooting: Bool { phase == .booting }
 
+    /// `subscribe(to:)` re-sends the subscription AND both checks; since the
+    /// relay answers identical polls again (review/62 D2), this genuinely
+    /// refreshes rather than performing.
+    func refreshLiveness() async {
+        await manager?.subscribe(to: peers.map(\.peer))
+    }
+
     // `peers` and `snapshot` are already published under those names; the
     // protocol renames them so a conformance cannot be satisfied by accident
     // by some future unrelated property.

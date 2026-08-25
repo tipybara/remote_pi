@@ -163,6 +163,16 @@ final class HomeScreenModel {
     /// and so a future subscription has an obvious home.
     func deactivate() {}
 
+    /// Pull-to-refresh: re-poll presence and rooms.
+    ///
+    /// Meaningful since review/62-audit-state-sync.md D2 — the relay used to
+    /// suppress a check reply identical to the previous one, which made a
+    /// manual refresh theatre exactly when the user reached for it (their copy
+    /// wrong, the relay's unchanged). Polls always answer now.
+    func refresh() async {
+        await backend?.refreshLiveness()
+    }
+
     // MARK: Derived read model
 
     /// The list, its counts and its phase, from one traversal.

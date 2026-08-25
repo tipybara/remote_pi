@@ -103,6 +103,9 @@ protocol HomeBackend: AnyObject, Observable {
     /// Waits for the relay to announce the new room. `false` means "created,
     /// not online yet" — never "failed" (spec 08 §7.9, §13.10).
     func waitForSession(_ session: SessionKey, timeout: Duration) async -> Bool
+
+    /// Re-poll presence and rooms for every known peer (pull-to-refresh).
+    func refreshLiveness() async
 }
 
 /// Raised by a `HomeBackend` method the current build cannot perform.
@@ -117,4 +120,12 @@ struct HomeBackendUnavailable: LocalizedError, Hashable {
     var errorDescription: String? {
         "\(capability) is not available in this build yet."
     }
+}
+
+
+/// Fakes that predate `refreshLiveness()` keep compiling; a refresh they do
+/// not model is a no-op, which is also the honest behaviour for a fake with no
+/// socket.
+extension HomeBackend {
+    func refreshLiveness() async {}
 }

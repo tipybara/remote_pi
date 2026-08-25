@@ -2,7 +2,21 @@ import RemotePiProtocol
 import SwiftUI
 
 // ============================================================================
-// Settings — spec 08 §9. Ported from `settings_page.dart` / `settings_sheet.dart`.
+// Settings — spec 08 §9, HIG edition (redesigned 2026-08-26).
+//
+// A standard inset-grouped Form with three sections: Server, Appearance,
+// Paired Devices. Three deliberate framing decisions:
+//
+//   * **One server.** The section is singular by construction — an address
+//     field, a footer stating what the app is dialling, and a reset row that
+//     appears only while an override is active. Nothing here can grow into a
+//     server list.
+//   * System text styles and default row chrome throughout, so Dynamic Type
+//     and dark mode come from the OS. Monospace survives only where the
+//     content is an identifier (the URL, key fingerprints in PeerRow).
+//   * Text size is still deliberately absent — spec 08 §9.2: a native app
+//     honours the per-app Text Size in Settings → Accessibility instead of
+//     shipping a second knob that multiplies against it.
 //
 // ONE page with two presentations, selected by `isEmbedded`:
 //   phone  → pushed (`AppRoute.settings`), the stack's own back button;
@@ -27,14 +41,11 @@ struct SettingsScreen: View {
 
     var body: some View {
         List {
-            relaySection
-            displaySection
-            pairingsSection
+            serverSection
+            appearanceSection
+            devicesSection
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(theme.colors.bg)
-        .environment(\.defaultMinListRowHeight, 0)
+        .listStyle(.insetGrouped)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -75,232 +86,149 @@ struct SettingsScreen: View {
         .screenModel(model)
     }
 
-    // MARK: - RELAY (§9.1)
+    // MARK: - Server (§9.1, single-server framing)
+
+    /// `true` while the field is dialling something other than the built-in
+    /// release server. Drives the reset row's visibility.
+    private var isOverridden: Bool {
+        model.effectiveRelayURL != AppModel.defaultRelayURL
+    }
 
     @ViewBuilder
-    private var relaySection: some View {
-        row {
-            SectionHeader(title: "Relay", style: .device)
-        }
-        row {
-            VStack(alignment: .leading, spacing: 10) {
-                TextField("https://my-relay.example.com", text: $model.relayDraft)
-                    .font(theme.type.mono(13))
-                    .foregroundStyle(theme.colors.text)
+    private var serverSection: some View {
+        Section {
+            HStack {
+                TextField("Server address", text: $model.relayDraft, prompt: Text(AppModel.defaultRelayURL))
+                    .font(.callout.monospaced())
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                    .submitLabel(.go)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 10)
-                    .background(theme.colors.inputFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(
-                                model.relayError == nil
-                                    ? theme.colors.border
-                                    : theme.colors.error,
-                                lineWidth: AppMetrics.hairline
-                            )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .submitLabel(.done)
                     .onChange(of: model.relayDraft) { model.relayDraftEdited() }
                     .onSubmit { Task { await model.saveRelayURL() } }
                     .disabled(model.isSavingRelay)
-
-                if let error = model.relayError {
-                    Text(error)
-                        .font(theme.type.mono(10))
-                        .foregroundStyle(theme.colors.error)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    // "what you are dialling now", which is not necessarily
-                    // what is in the field above.
-                    Text("Current: \(model.effectiveRelayURL)")
-                        .font(theme.type.mono(10))
-                        .foregroundStyle(theme.colors.muted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                HStack(spacing: 12) {
-                    PrimaryButton(
-                        title: "Save",
-                        isEnabled: !model.isSavingRelay,
-                        isBusy: model.isSavingRelay
-                    ) {
-                        Task { await model.saveRelayURL() }
-                    }
-                    .frame(maxWidth: 140)
-
-                    Button {
-                        Task { await model.useDefaultRelay() }
-                    } label: {
-                        Text("Use default Relay")
-                            .font(theme.type.mono(13))
-                            .foregroundStyle(theme.colors.accent)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(model.isSavingRelay)
-
-                    Spacer(minLength: 0)
-                }
-
-                // Only the transient "Relay updated" confirmation belongs
-                // here. A revoke warning is about the pairings list and is
-                // rendered down there — showing it in both places reads as two
-                // separate problems.
-                if let banner = model.banner, banner.kind == .info {
-                    BannerLabel(banner: banner)
+                if model.isSavingRelay {
+                    ProgressView()
                 }
             }
-            .padding(.horizontal, AppMetrics.gutter)
-            .padding(.top, 4)
-            .padding(.bottom, 14)
+
+            if isOverridden {
+                Button("Reset to Default Server") {
+                    Task { await model.useDefaultRelay() }
+                }
+                .disabled(model.isSavingRelay)
+            }
+        } header: {
+            Text("Server")
+        } footer: {
+            serverFooter
         }
-        divider
     }
 
-    // MARK: - DISPLAY (§9.2)
+    /// One line that always states what the app is actually dialling — which
+    /// is not necessarily what is in the field above. Errors and the transient
+    /// "updated" confirmation take the same slot: a footer is where iOS puts
+    /// per-section status, and stacking three message areas reads as three
+    /// problems.
+    @ViewBuilder
+    private var serverFooter: some View {
+        if let error = model.relayError {
+            Text(error).foregroundStyle(theme.colors.error)
+        } else if let banner = model.banner, banner.kind == .info {
+            Text(banner.text).foregroundStyle(theme.colors.success)
+        } else if isOverridden {
+            Text("Connected to a custom server: \(model.effectiveRelayURL). The app uses one server at a time.")
+        } else {
+            Text("Connected to the Remote Pi server. Enter an address above only if you run your own relay.")
+        }
+    }
+
+    // MARK: - Appearance (§9.2)
 
     @ViewBuilder
-    private var displaySection: some View {
+    private var appearanceSection: some View {
         @Bindable var preferences = app.preferences
 
-        row {
-            SectionHeader(title: "Display", style: .device)
-        }
-        row {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Theme")
-                    .font(theme.type.sansBody)
-                    .foregroundStyle(theme.colors.text)
-                Picker("Theme", selection: $preferences.themeMode) {
-                    ForEach(AppThemeMode.allCases, id: \.self) { mode in
-                        Text(mode.label).tag(mode)
-                    }
+        Section("Appearance") {
+            Picker("Theme", selection: $preferences.themeMode) {
+                ForEach(AppThemeMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
             }
-            .padding(.horizontal, AppMetrics.gutter)
-            .padding(.vertical, 4)
+
+            Toggle(isOn: $preferences.hideToolCalls) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Hide Tool Calls")
+                    Text("Only show your messages and the replies.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
 
         // ── Text size: deliberately absent ─────────────────────────────────
-        //
-        // Flutter had a 4-way Small/Default/Large/XL segmented control here
-        // because the Dart app hardcodes every font size and Flutter cannot
-        // read iOS's per-app Text Size, so the OS accessibility setting did
-        // nothing (issue #114). Spec 08 §9.2 says a native client should drop
-        // the control and honour Dynamic Type instead — a native app gets the
-        // per-app Text Size slider in Settings → Accessibility → Display &
-        // Text Size → Per-App Settings for free, and a second in-app knob
-        // multiplied against it produces sizes neither one asked for.
-        //
-        // ⚠️ The other half of that trade is NOT done here: `AppTypography`
-        // still returns fixed `Font.system(size:)` values, so nothing scales
-        // yet. Wiring it is one line in `AppTypography.mono/sans/brand`
-        // (`.custom(_, size:relativeTo:)`, or `UIFontMetrics.default
-        // .scaledValue(for:)`), and it belongs to whoever owns the design
-        // system — not to a screen. Until then `AppPreferences.fontScale`
-        // keeps whatever value it was last given and has no UI.
-        // ───────────────────────────────────────────────────────────────────
-
-        row {
-            Toggle(isOn: $preferences.hideToolCalls) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Hide tool calls in chat")
-                        .font(theme.type.sansBody)
-                        .foregroundStyle(theme.colors.text)
-                    Text("Only show your messages and the assistant replies.")
-                        .font(theme.type.sans(12))
-                        .foregroundStyle(theme.colors.muted)
-                }
-            }
-            .tint(theme.colors.accent)
-            .padding(.horizontal, AppMetrics.gutter)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-        }
-        divider
+        // Flutter had a 4-way segmented control here because the Dart app
+        // hardcodes font sizes and cannot read iOS's per-app Text Size
+        // (issue #114). This screen now uses system text styles, so the OS
+        // control in Settings → Accessibility → Per-App Settings works — and
+        // a second in-app knob would multiply against it, producing sizes
+        // neither one asked for (spec 08 §9.2).
     }
 
-    // MARK: - PAIRINGS (§9.3)
+    // MARK: - Paired devices (§9.3)
 
     @ViewBuilder
-    private var pairingsSection: some View {
-        row {
-            SectionHeader(
-                title: "Pairings",
-                style: .device,
-                count: pairingCount
-            )
-        }
+    private var devicesSection: some View {
+        Section {
+            switch model.pairings {
+            case .loading:
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.vertical, 16)
 
-        switch model.pairings {
-        case .loading:
-            row {
-                ProgressView()
-                    .tint(theme.colors.accent)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 32)
-            }
-        case .empty:
-            row {
-                EmptyStateView(
-                    systemImage: "laptopcomputer.and.iphone",
-                    title: "No pairings yet",
-                    message: "Tap + to pair a new Mac."
-                ) {
-                    PrimaryButton(title: "Scan QR") { navigator.openPairing() }
-                        .frame(maxWidth: 220)
+            case .empty:
+                ContentUnavailableView {
+                    Label("No Pairings Yet", systemImage: "laptopcomputer.and.iphone")
+                } description: {
+                    Text("Pair a Mac to control its sessions from this device.")
+                }
+                .padding(.vertical, -8)
+
+            case .list(let records):
+                // `id: \.peer` — the 32 raw key bytes. Never the index, never
+                // the nickname: both change under the user (plan 61).
+                ForEach(records, id: \.peer) { record in
+                    PeerRow(
+                        record: record,
+                        isRevoking: model.revoking == record.peer,
+                        onEditNickname: { model.beginNicknameEdit(record) },
+                        onRevoke: { model.requestRevoke(record) }
+                    )
                 }
             }
-        case .list(let records):
-            // `id: \.peer` — the 32 raw key bytes. Never the index, never the
-            // nickname: both change under the user (plan 61, spec 08 §2.1).
-            ForEach(records, id: \.peer) { record in
-                PeerRow(
-                    record: record,
-                    isRevoking: model.revoking == record.peer,
-                    onEditNickname: { model.beginNicknameEdit(record) },
-                    onRevoke: { model.requestRevoke(record) }
-                )
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(theme.colors.bg)
-                .listRowSeparator(.hidden)
-            }
-        }
 
-        // Deliberately outside the `switch`: the case that matters most is
-        // "you just revoked your LAST pairing and the relay did not hear about
-        // it", where `pairings` is `.empty`. Scoping this to `.list` would hide
-        // the warning exactly when it is load-bearing.
-        if let banner = model.banner, banner.kind != .info {
-            row {
-                BannerLabel(banner: banner)
-                    .padding(.horizontal, AppMetrics.gutter)
-                    .padding(.top, 10)
+            Button {
+                navigator.openPairing()
+            } label: {
+                Label("Pair New Mac…", systemImage: "qrcode.viewfinder")
             }
-        }
-
-        row {
-            SecondaryButton(title: "Add new pairing") { navigator.openPairing() }
-                .padding(.horizontal, AppMetrics.gutter)
-                .padding(.top, 12)
-                .padding(.bottom, 24)
+        } header: {
+            Text("Paired Devices")
+        } footer: {
+            // Deliberately rendered for every pairings state: the case that
+            // matters most is "you just revoked your LAST pairing and the
+            // relay did not hear about it", where the list above is empty.
+            if let banner = model.banner, banner.kind != .info {
+                Text(banner.text)
+                    .foregroundStyle(banner.kind == .error ? theme.colors.error : theme.colors.warning)
+            }
         }
     }
 
     // MARK: - Plumbing
-
-    /// A count only when there is something to count — `SectionHeader` treats
-    /// `0` as "draw a zero", and an empty section should not have one.
-    private var pairingCount: Int? {
-        let count = model.pairings.records.count
-        return count == 0 ? nil : count
-    }
 
     /// Swipe-down / tap-outside must be a *cancel*, not a silent write — the
     /// nickname sheet's three outcomes (save / clear / cancel) are the
@@ -325,45 +253,5 @@ struct SettingsScreen: View {
             get: { model.revokeCandidate != nil },
             set: { if !$0 { model.cancelRevoke() } }
         )
-    }
-
-    @ViewBuilder
-    private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(theme.colors.bg)
-            .listRowSeparator(.hidden)
-    }
-
-    private var divider: some View {
-        row {
-            Rectangle()
-                .fill(theme.colors.border)
-                .frame(height: AppMetrics.hairline)
-                .padding(.top, 8)
-        }
-    }
-}
-
-/// The inline "Relay updated" / "the relay was not updated" line.
-private struct BannerLabel: View {
-    let banner: SettingsScreenModel.Banner
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        Text(banner.text)
-            .font(theme.type.mono(11))
-            .foregroundStyle(color)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isStaticText)
-    }
-
-    private var color: Color {
-        switch banner.kind {
-        case .info: theme.colors.success
-        case .warning: theme.colors.warning
-        case .error: theme.colors.error
-        }
     }
 }

@@ -53,8 +53,11 @@ targets:
         # No signing team here — CI builds for the simulator, and a developer
         # sets their own team locally rather than committing one.
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGNING_ALLOWED: NO
+        # Real-device installs need a team. Generate with:
+        #   DEVELOPMENT_TEAM=<your team id> xcodegen generate
+        # or pick the team once in Xcode's Signing pane after generating.
+        # Simulator builds work either way (sign-to-run-locally).
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         ENABLE_PREVIEWS: YES
     info:
