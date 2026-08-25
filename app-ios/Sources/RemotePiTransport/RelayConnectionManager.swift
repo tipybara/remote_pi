@@ -76,6 +76,19 @@ public actor RelayConnectionManager {
     /// are incremented, and that wiring is exactly what regressed before.
     private(set) var retryAttempt = 0
     private(set) var missedPings = 0
+
+    /// Plan 62 state-sync audit — the one room WE (not the relay) marked
+    /// offline after 3 unanswered inner pings. Local pessimism is reversible
+    /// by local evidence (any envelope proves the Pi answers again); the
+    /// relay's own verdicts (`room_ended`, a `rooms` snapshot,
+    /// `transport_error`) settle the mark and are never overturned from here.
+    ///
+    /// Without this the mark was PERMANENT: `room_announced` only fires on a
+    /// room's first connection — a Pi whose socket never dropped never
+    /// re-announces — and the relay used to suppress identical `rooms_check`
+    /// replies, so the recovery the old pingTick comment promised did not
+    /// exist. The tile stayed grey until the Pi process restarted.
+    private var locallyMarkedOffline: (peer: PeerID, room: RoomID)?
     private var pingCounter = 0
 
     private var subscribedPeers: [PeerID] = []
@@ -225,6 +238,15 @@ public actor RelayConnectionManager {
             // flowing from the relay while the agent is dead.
             missedPings = 0
             retryAttempt = 0
+            // …and REVERSE a missed-ping mark: this frame passed the demux,
+            // so the Pi is demonstrably answering again. Only OUR guess is
+            // reversible here — a mark settled by a relay verdict is gone by
+            // the time this runs (see apply(_:)).
+            if let marked = locallyMarkedOffline,
+               marked.peer == remotePeer, marked.room == activeRoom {
+                locallyMarkedOffline = nil
+                insertLiveRoom(marked.room, of: marked.peer)
+            }
             continuation.yield(.envelope(envelope))
 
         case .control(let frame):
@@ -247,18 +269,31 @@ public actor RelayConnectionManager {
     private func apply(_ frame: ControlFrame) {
         switch frame {
         case .roomAnnounced(let peer, let meta):
+            // Relay says alive — our pessimistic mark (if any) is settled.
+            if locallyMarkedOffline?.peer == peer, locallyMarkedOffline?.room == meta.roomID {
+                locallyMarkedOffline = nil
+            }
             insertLiveRoom(meta.roomID, of: peer)
 
         case .roomEnded(let peer, let room, _):
             // "The process is gone", not "the session was deleted". Post-plan-61
             // a rename never produces this frame, so the tile stays; only the
             // live flag drops.
+            //
+            // The relay's verdict also settles our local guess: this death is
+            // real, and inbound traffic must not revive the room.
+            if locallyMarkedOffline?.peer == peer, locallyMarkedOffline?.room == room {
+                locallyMarkedOffline = nil
+            }
             removeLiveRoom(room, of: peer)
 
         case .rooms(let peer, let rooms):
             // The authoritative live set for that peer. An empty array means
             // "every room is dead", not "no information" — replace wholesale.
             let live = Set(rooms.map(\.roomID))
+            // The snapshot is the relay's full verdict for this peer;
+            // whatever we guessed locally is superseded either way.
+            if locallyMarkedOffline?.peer == peer { locallyMarkedOffline = nil }
             if liveRooms[peer] != live {
                 if live.isEmpty { liveRooms.removeValue(forKey: peer) } else { liveRooms[peer] = live }
                 continuation.yield(.liveRoomsChanged(peer: peer, live: live))
@@ -270,6 +305,11 @@ public actor RelayConnectionManager {
             // frame failed. Drop the room's live flag now so outstanding sends
             // can be failed immediately instead of waiting out a ~20 s
             // no-echo timer. The next `room_announced` puts it back.
+            //
+            // A relay verdict, so it also settles our local missed-ping guess.
+            if locallyMarkedOffline?.peer == peer, locallyMarkedOffline?.room == room {
+                locallyMarkedOffline = nil
+            }
             removeLiveRoom(room, of: peer)
 
         case .challenge, .peerOnline, .peerOffline, .presence, .roomMetaUpdated:
@@ -331,6 +371,10 @@ public actor RelayConnectionManager {
         if pinned { activeRoomPinned = true }
         activeRoomOwner = owner
         guard room != activeRoom else { return }
+        // A mark made for the room we are leaving must not linger: after the
+        // switch, a frame from the NEW room would otherwise revive a room the
+        // user is no longer pointed at.
+        locallyMarkedOffline = nil
         activeRoom = room
         await transport?.setActiveRoom(room)
     }
@@ -464,9 +508,13 @@ public actor RelayConnectionManager {
         if missedPings == timing.missedPingsBeforeRoomOffline {
             markActiveRoomOffline()
             // Deliberately no early return. Pings keep firing and the counter
-            // keeps climbing, so this fires exactly once per outage; when the
-            // Pi comes back, any inbound frame resets the counter and
-            // `room_announced` puts the room back in the live set.
+            // keeps climbing, so this fires exactly once per outage. Recovery
+            // is the `.envelope` branch of the receive loop: the next frame
+            // that passes the demux reverses the mark and re-inserts the live
+            // flag. (An earlier version of this comment claimed
+            // `room_announced` would do it — it cannot: that frame only fires
+            // on a room's FIRST connection, and a Pi whose socket never
+            // dropped never re-announces. Plan 62 state-sync audit.)
         }
 
         pingCounter += 1
@@ -493,6 +541,7 @@ public actor RelayConnectionManager {
     /// offline. Presence and the other rooms keep flowing here.
     private func markActiveRoomOffline() {
         guard let peer = remotePeer else { return }
+        locallyMarkedOffline = (peer: peer, room: activeRoom)
         removeLiveRoom(activeRoom, of: peer)
     }
 
@@ -518,6 +567,8 @@ public actor RelayConnectionManager {
     }
 
     private func clearLiveRooms() {
+        // The guess dies with the connection it was made on.
+        locallyMarkedOffline = nil
         guard !liveRooms.isEmpty else { return }
         let peers = Array(liveRooms.keys)
         liveRooms.removeAll()

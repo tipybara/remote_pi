@@ -252,7 +252,12 @@ final class AppModel {
     /// the list level, or a session that finishes while another chat is open
     /// keeps a blue dot forever (spec 08 §7.6.1).
     func isWorking(_ session: SessionKey) -> Bool {
-        isRelayConnected && (snapshot.room(session)?.working ?? false)
+        // working ⊆ live, by definition: an in-flight turn requires a
+        // running, registered process (plan 62 state-sync audit). Without
+        // the gate, a stale `working: true` on a cached dead room outranks
+        // every other dot state and paints an offline session blue.
+        isRelayConnected && snapshot.isLive(session)
+            && (snapshot.room(session)?.working ?? false)
     }
 
     /// The presence level for one session, with the priority ladder applied.

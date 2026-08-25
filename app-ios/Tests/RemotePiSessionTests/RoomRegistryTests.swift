@@ -218,6 +218,69 @@ final class RoomRegistryTests: XCTestCase {
         XCTAssertEqual(rooms.first?.name, "backend")
     }
 
+    /// Plan 62 state-sync audit — a dead process cannot be mid-turn.
+    ///
+    /// `working: true` used to survive the room's death in the cache. The
+    /// presence ladder ranks working above everything else, so a Pi killed
+    /// mid-turn kept a BLUE dot on an offline session until the process
+    /// itself restarted (the plan-61 relay audit called this "grey tile can
+    /// stick busy" and it was never fixed — in either client).
+    func testRoomEndedClearsWorking() async throws {
+        let registry = RoomRegistry()
+        try await announce(
+            registry,
+            """
+            "room_id": "019ffb64-1c3e-7a91-b0d2-6f2a1c9e77aa",
+            "name": "backend", "working": true, "started_at": 1
+            """
+        )
+        let before = await registry.rooms(for: machineKey)
+        XCTAssertEqual(before.first?.working, true, "seeded mid-turn")
+
+        _ = await registry.apply(
+            try controlFrame(
+                """
+                { "type": "room_ended", "peer": "\(machineKey.wireValue)",
+                  "room_id": "019ffb64-1c3e-7a91-b0d2-6f2a1c9e77aa",
+                  "since_ts": 1780000000999 }
+                """
+            )
+        )
+
+        let rooms = await registry.rooms(for: machineKey)
+        XCTAssertEqual(rooms.count, 1, "the tile must survive")
+        XCTAssertEqual(
+            rooms.first?.working, false,
+            "the cache itself must be honest — a gated getter alone would let persistence resurrect the flag"
+        )
+    }
+
+    /// `transport_error` routes through the same death path and must clear
+    /// `working` the same way.
+    func testTransportErrorClearsWorking() async throws {
+        let registry = RoomRegistry()
+        try await announce(
+            registry,
+            """
+            "room_id": "019ffb64-1c3e-7a91-b0d2-6f2a1c9e77aa",
+            "name": "backend", "working": true, "started_at": 1
+            """
+        )
+        _ = await registry.apply(
+            try controlFrame(
+                """
+                { "type": "transport_error", "reason": "offline",
+                  "peer": "\(machineKey.wireValue)",
+                  "room_id": "019ffb64-1c3e-7a91-b0d2-6f2a1c9e77aa" }
+                """
+            )
+        )
+        let rooms = await registry.rooms(for: machineKey)
+        XCTAssertEqual(rooms.first?.working, false)
+        let live = await registry.isLive(key(sessionRoom))
+        XCTAssertFalse(live)
+    }
+
     // MARK: - rooms snapshot
 
     /// `rooms` is the authoritative live set for that peer: a room absent from

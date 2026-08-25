@@ -410,7 +410,24 @@ public actor RoomRegistry {
     }
 
     private func markDead(_ room: RoomID, for peer: PeerID) -> Bool {
-        guard var live = liveByPeer[peer], live.remove(room) != nil else { return false }
+        // Plan 62 state-sync audit — a dead process cannot be mid-turn.
+        // `working` used to survive the room's death in the cache; the
+        // presence ladder ranks working above everything else, so a Pi
+        // killed mid-turn kept a BLUE dot on an offline session until the
+        // process itself restarted. Cleared here (both `room_ended` and
+        // `transport_error` route through markDead) so the cache stays
+        // honest for anything that persists or re-reads it — the
+        // `isWorking` accessor is additionally gated on liveness, belt and
+        // suspenders in the same direction.
+        var workingCleared = false
+        if var meta = roomsByPeer[peer]?[room], meta.working {
+            meta.working = false
+            roomsByPeer[peer]?[room] = meta
+            workingCleared = true
+        }
+        guard var live = liveByPeer[peer], live.remove(room) != nil else {
+            return workingCleared
+        }
         if live.isEmpty {
             liveByPeer[peer] = nil
         } else {

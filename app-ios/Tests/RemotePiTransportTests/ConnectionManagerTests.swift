@@ -245,6 +245,68 @@ final class ConnectionManagerTests: XCTestCase {
         XCTAssertFalse(socket.closed)
     }
 
+    /// Plan 62 state-sync audit — the missed-ping mark is REVERSIBLE by the
+    /// next inbound envelope.
+    ///
+    /// It used to be permanent: the recovery the pingTick comment promised
+    /// ("room_announced puts the room back") cannot happen for a Pi whose
+    /// socket never dropped — that frame only fires on a room's FIRST
+    /// connection — and the relay suppressed identical `rooms_check` replies,
+    /// so the poll channel was starved too. The tile stayed grey until the Pi
+    /// process itself restarted.
+    func testInboundEnvelopeRevivesALocallyMarkedRoom() async throws {
+        let (manager, sockets) = try await startedManager()
+        defer { Task { await manager.stop() } }
+        let socket = try XCTUnwrap(sockets.latest)
+
+        socket.push("""
+            {"type":"room_announced","peer":"\(Fixture.piKeyWire)","room_id":"\(activeRoom.rawValue)",\
+            "working":false,"started_at":1}
+            """)
+        await expectEventually { await manager.isRoomLive(activeRoom, of: Fixture.piKey) }
+
+        // Pi goes silent → our local guess marks it offline.
+        await expectEventually { await manager.missedPings >= 3 }
+        expectFalse(await manager.isRoomLive(activeRoom, of: Fixture.piKey))
+
+        // The Pi answers again. No room_announced will ever come (its socket
+        // never dropped), so THIS is the only recovery signal that exists.
+        let pong = Data(#"{"type":"pong","in_reply_to":"ping_9"}"#.utf8).base64EncodedString()
+        socket.push(#"{"peer":"\#(Fixture.piKeyWire)","room":"\#(activeRoom.rawValue)","ct":"\#(pong)"}"#)
+
+        await expectEventually { await manager.isRoomLive(activeRoom, of: Fixture.piKey) }
+    }
+
+    /// The relay's `room_ended` is a verdict, not a guess — a straggler
+    /// envelope (e.g. a Pong queued before the death) must not overturn it.
+    /// Only OUR OWN missed-ping mark is reversible from the inbound path.
+    func testRoomEndedIsNotOverturnedByAStragglerEnvelope() async throws {
+        let (manager, sockets) = try await startedManager()
+        defer { Task { await manager.stop() } }
+        let socket = try XCTUnwrap(sockets.latest)
+
+        socket.push("""
+            {"type":"room_announced","peer":"\(Fixture.piKeyWire)","room_id":"\(activeRoom.rawValue)",\
+            "working":false,"started_at":1}
+            """)
+        await expectEventually { await manager.isRoomLive(activeRoom, of: Fixture.piKey) }
+
+        // We guessed offline first; then the relay CONFIRMED the death.
+        await expectEventually { await manager.missedPings >= 3 }
+        socket.push("""
+            {"type":"room_ended","peer":"\(Fixture.piKeyWire)","room_id":"\(activeRoom.rawValue)",\
+            "since_ts":2}
+            """)
+        await expectEventually { !(await manager.isRoomLive(activeRoom, of: Fixture.piKey)) }
+
+        let pong = Data(#"{"type":"pong","in_reply_to":"ping_9"}"#.utf8).base64EncodedString()
+        socket.push(#"{"peer":"\#(Fixture.piKeyWire)","room":"\#(activeRoom.rawValue)","ct":"\#(pong)"}"#)
+
+        // Give the pump a beat, then assert the verdict held.
+        try await Task.sleep(for: .milliseconds(120))
+        expectFalse(await manager.isRoomLive(activeRoom, of: Fixture.piKey))
+    }
+
     /// Any inbound **envelope** resets the miss counter and the backoff rung.
     ///
     /// Envelopes only, and that is deliberate (`connection_manager.dart:20-25`,
