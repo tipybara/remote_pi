@@ -1695,6 +1695,185 @@ void _registerRoomsTests() {
       },
     );
 
+    // ── Plan 62 state-sync audit — the missed-ping mark is reversible ────
+    //
+    // Three unanswered inner pings mark the active room offline locally.
+    // That mark used to be PERMANENT: the claimed recovery ("room_announced
+    // repopulates the live set") never fires for a Pi whose WS stayed up,
+    // the relay suppressed identical rooms_check replies, and the inbound
+    // handler's revive logic had been amputated to two empty if-blocks. The
+    // tile stayed grey until the Pi's process restarted.
+
+    test(
+      'missed-ping offline mark is REVERSED by the next inbound frame',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_revive',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'sess-1',
+        );
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage([peer]),
+          emitDebounce: Duration.zero,
+        );
+        await cm.connectTo(peer);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_revive',
+          roomId: 'sess-1',
+          startedAt: 1,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(cm.isRoomLive('epk_revive', 'sess-1'), isTrue);
+
+        cm.debugMarkActiveRoomOfflineForTest();
+        expect(cm.isRoomLive('epk_revive', 'sess-1'), isFalse,
+            reason: '3 missed pings → locally offline');
+
+        // The Pi answers again (a Pong, an echo — any frame that passes the
+        // demux). The local guess must be reversed without waiting for a
+        // room_announced that will never come.
+        ch.pushMessage(Pong(inReplyTo: 'ping_1'));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(cm.isRoomLive('epk_revive', 'sess-1'), isTrue,
+            reason: 'inbound traffic proves the Pi is alive');
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      "the relay's room_ended is NOT reversed by inbound traffic — only our "
+      'own guess is',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_no_revive',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'sess-1',
+        );
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage([peer]),
+          emitDebounce: Duration.zero,
+        );
+        await cm.connectTo(peer);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_no_revive',
+          roomId: 'sess-1',
+          startedAt: 1,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        // We guessed offline; then the relay CONFIRMED the death.
+        cm.debugMarkActiveRoomOfflineForTest();
+        ch.pushControl(const RoomEnded(
+          peer: 'epk_no_revive',
+          roomId: 'sess-1',
+          sinceTs: 2,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        // A straggler frame (e.g. a Pong queued before the death) must not
+        // overturn the relay's verdict.
+        ch.pushMessage(Pong(inReplyTo: 'ping_9'));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(cm.isRoomLive('epk_no_revive', 'sess-1'), isFalse,
+            reason: 'relay verdicts are only reversed by the relay');
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'room_ended clears working — a dead process cannot be mid-turn, and '
+      'the stale flag used to paint an offline session BLUE forever',
+      () async {
+        const peer = PeerRecord(
+          remoteEpk: 'epk_dead_busy',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'sess-1',
+        );
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage([peer]),
+          emitDebounce: Duration.zero,
+        );
+        await cm.connectTo(peer);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_dead_busy',
+          roomId: 'sess-1',
+          startedAt: 1,
+          working: true,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(cm.isRoomWorking('epk_dead_busy', 'sess-1'), isTrue);
+
+        // Pi killed mid-turn → last conn drops → room_ended.
+        ch.pushControl(const RoomEnded(
+          peer: 'epk_dead_busy',
+          roomId: 'sess-1',
+          sinceTs: 2,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(cm.isRoomWorking('epk_dead_busy', 'sess-1'), isFalse);
+        // And the CACHE is honest too, not just the getter: the flag itself
+        // is cleared so persistence cannot resurrect it.
+        expect(cm.roomsFor('epk_dead_busy').single.working, isFalse);
+
+        cm.dispose();
+      },
+    );
+
+    test('transport_error clears working the same way', () async {
+      const peer = PeerRecord(
+        remoteEpk: 'epk_te_busy',
+        sessionName: 'Pi',
+        relayUrl: 'wss://x',
+        pairedAt: '2026-01-01T00:00:00Z',
+        roomId: 'sess-1',
+      );
+      final ch = _ControllableChannel();
+      final cm = ConnectionManager(
+        factory: (_, _) async => ch,
+        storage: _FakeStorage([peer]),
+        emitDebounce: Duration.zero,
+      );
+      await cm.connectTo(peer);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      ch.pushControl(const RoomAnnounced(
+        peer: 'epk_te_busy',
+        roomId: 'sess-1',
+        startedAt: 1,
+        working: true,
+      ));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      ch.pushControl(const TransportError(
+        peer: 'epk_te_busy',
+        roomId: 'sess-1',
+        reason: 'offline',
+      ));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(cm.isRoomWorking('epk_te_busy', 'sess-1'), isFalse);
+      expect(cm.roomsFor('epk_te_busy').single.working, isFalse);
+
+      cm.dispose();
+    });
+
     test(
       'switchRoom(epk:) pins for a machine we are not connected to yet — '
       'Home taps a tile before any WS to that Mac exists',

@@ -31,6 +31,8 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'package:app/data/transport/channel.dart';
 import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/domain/contracts/service.dart';
@@ -147,6 +149,24 @@ class ConnectionManager extends Service {
   String _activeRoomId = 'main';
   String? _activeRoomOwner;
   bool _activeRoomPinned = false;
+
+  // Plan 62 state-sync audit — the one room WE (not the relay) marked
+  // offline, because 3 inner pings went unanswered. Kept separate from
+  // `_liveRoomIds` so the two verdicts stay distinguishable:
+  //
+  //   local pessimism  → reversible by local evidence (any inbound frame
+  //                      proves the Pi is answering again);
+  //   relay's verdict  → reversible only by the relay (`room_announced` /
+  //                      a `rooms` snapshot).
+  //
+  // Without this, the missed-ping mark was PERMANENT: `room_announced`
+  // only fires on a room's first connection (the Pi never reconnected, so
+  // it never re-fired) and the relay used to suppress identical
+  // `rooms_check` replies — so the tile stayed grey until the Pi's WS
+  // actually restarted. The old comment in `_startPing` claimed recovery
+  // happened "automatically"; the code for it had been amputated (two
+  // empty `if` blocks in `_watchChannel`).
+  ({String key, String roomId})? _locallyMarkedOffline;
 
   Timer? _retryTimer;
   Timer? _pingTimer;
@@ -271,6 +291,10 @@ class ConnectionManager extends Service {
     // Pin BEFORE the no-op guard: re-selecting the room we already point at
     // still turns a tentative hint into a user-chosen target.
     _activeRoomPinned = true;
+    // A mark made for the room we are leaving must not linger: after the
+    // switch, an RPC-reply frame could otherwise revive a room the user is
+    // no longer even pointed at.
+    _locallyMarkedOffline = null;
     final owner = epk ?? _activePeer?.remoteEpk;
     if (owner != null && owner.isNotEmpty) {
       _activeRoomOwner = toStandardB64(owner);
@@ -711,6 +735,11 @@ class ConnectionManager extends Service {
         list.add(next);
         _roomsByPeer[key] = list;
         (_liveRoomIds[key] ??= <String>{}).add(roomId);
+        // Relay says alive — our pessimistic mark (if any) is settled.
+        if (_locallyMarkedOffline?.key == key &&
+            _locallyMarkedOffline?.roomId == roomId) {
+          _locallyMarkedOffline = null;
+        }
         roomsDirty = true;
         // Persist the new view so cold restart shows the same tiles.
         // ignore: unawaited_futures
@@ -731,6 +760,25 @@ class ConnectionManager extends Service {
           _liveRoomIds.remove(key);
         }
         if (removed) roomsDirty = true;
+        // Plan 62 state-sync audit — a dead process cannot be mid-turn.
+        // `working` used to survive the room's death in the cache, and the
+        // Home dot ranks working above everything else, so a Pi killed
+        // mid-turn left a BLUE dot on an offline session indefinitely
+        // (the relay audit's "grey tile can stick busy", never fixed).
+        final endedList = _roomsByPeer[key];
+        if (endedList != null) {
+          final idx = endedList.indexWhere((r) => r.roomId == roomId);
+          if (idx >= 0 && endedList[idx].working) {
+            endedList[idx] = endedList[idx].copyWith(working: false);
+            roomsDirty = true;
+          }
+        }
+        // The relay's verdict settles our local guess: this death is real,
+        // so inbound traffic must not revive the room.
+        if (_locallyMarkedOffline?.key == key &&
+            _locallyMarkedOffline?.roomId == roomId) {
+          _locallyMarkedOffline = null;
+        }
       case RoomMetaUpdated(
         :final peer,
         :final roomId,
@@ -810,6 +858,20 @@ class ConnectionManager extends Service {
           if (live.isEmpty) _liveRoomIds.remove(key);
           roomsDirty = true;
         }
+        // Same two clean-ups as RoomEnded, same reasons: nobody was there
+        // to be mid-turn, and the relay's word settles our local guess.
+        final erroredList = _roomsByPeer[key];
+        if (erroredList != null) {
+          final idx = erroredList.indexWhere((r) => r.roomId == roomId);
+          if (idx >= 0 && erroredList[idx].working) {
+            erroredList[idx] = erroredList[idx].copyWith(working: false);
+            roomsDirty = true;
+          }
+        }
+        if (_locallyMarkedOffline?.key == key &&
+            _locallyMarkedOffline?.roomId == roomId) {
+          _locallyMarkedOffline = null;
+        }
         if (!_transportErrorController.isClosed) {
           _transportErrorController.add(
             (epk: key, roomId: roomId, reason: reason),
@@ -863,6 +925,9 @@ class ConnectionManager extends Service {
         }
         _roomsByPeer[key] = newList;
         _liveRoomIds[key] = newLive;
+        // The snapshot is the relay's full verdict for this peer; whatever
+        // we guessed locally is superseded either way.
+        if (_locallyMarkedOffline?.key == key) _locallyMarkedOffline = null;
         roomsDirty = true;
         // ignore: unawaited_futures
         _persistRoomsForPeer(key);
@@ -973,6 +1038,11 @@ class ConnectionManager extends Service {
   /// fall back to the amber "reconnecting" / grey state.
   bool isRoomWorking(String epk, String roomId) {
     if (_status is! StatusOnline) return false;
+    // Plan 62 state-sync audit — working ⊆ live, by definition: an
+    // in-flight turn requires a running, registered process. Without this
+    // gate a stale `working: true` on a cached (dead) room outranked every
+    // other dot state and painted an offline session blue.
+    if (!isRoomLive(epk, roomId)) return false;
     final list = _roomsByPeer[toStandardB64(epk)];
     if (list == null) return false;
     for (final r in list) {
@@ -1184,11 +1254,29 @@ class ConnectionManager extends Service {
       (msg) {
         // Real inbound — the Pi is alive and reachable. Safe to reset
         // both the ping miss counter and the retry backoff.
-        final wasMissed = _missedPings;
-        if (wasMissed > 0) {}
-        if (_retryAttempt != 0) {}
         _missedPings = 0;
         _retryAttempt = 0;
+        // Plan 62 state-sync audit — and to REVERSE a missed-ping mark.
+        // The transport's demux only lets three kinds of frame reach this
+        // listener: active-room traffic, control-room RPC replies, and
+        // awaited `sendToRoom` replies. Only the first proves the ACTIVE
+        // room's Pi is alive, but reviving on the other two is
+        // self-correcting (a dead Pi answers no pings, so 3 more misses
+        // re-mark it within 75 s) and vastly better than the previous
+        // behaviour, which was to never revive at all.
+        //
+        // Strictly guarded on the mark being OURS: a room the relay
+        // declared dead (`room_ended` cleared the mark) is never revived
+        // from here.
+        final marked = _locallyMarkedOffline;
+        if (marked != null &&
+            _activePeer != null &&
+            marked.key == toStandardB64(_activePeer!.remoteEpk) &&
+            marked.roomId == _activeRoomId) {
+          _locallyMarkedOffline = null;
+          (_liveRoomIds[marked.key] ??= <String>{}).add(marked.roomId);
+          _scheduleRoomsEmit();
+        }
       },
       onError: (_) => _onChannelLost(peer, ch),
       onDone: () => _onChannelLost(peer, ch),
@@ -1224,6 +1312,8 @@ class ConnectionManager extends Service {
   /// (`_roomsByPeer`) is deliberately kept — those are the tiles Home shows
   /// offline/grey, and the user can still open them to read history.
   void _clearLiveRooms() {
+    // The guess dies with the connection it was made on.
+    _locallyMarkedOffline = null;
     if (_liveRoomIds.isEmpty) return;
     _liveRoomIds.clear();
     _scheduleRoomsEmit();
@@ -1294,10 +1384,19 @@ class ConnectionManager extends Service {
     if (live == null || !live.contains(_activeRoomId)) return;
     live.remove(_activeRoomId);
     if (live.isEmpty) _liveRoomIds.remove(key);
+    // Remember that this removal was OUR guess, so inbound traffic can
+    // reverse it (see _watchChannel). A relay `room_ended` clears this —
+    // the relay's verdict is not ours to overturn.
+    _locallyMarkedOffline = (key: key, roomId: _activeRoomId);
     if (!_roomsController.isClosed) {
       _roomsController.add(_roomsSnapshot());
     }
   }
+
+  /// Test seam — drive the missed-ping mark without waiting out 3 × 25 s of
+  /// real ping cadence. Calls the same internal path the ping timer does.
+  @visibleForTesting
+  void debugMarkActiveRoomOfflineForTest() => _markActiveRoomOffline();
 
   void _cancelRetry() {
     _retryTimer?.cancel();
