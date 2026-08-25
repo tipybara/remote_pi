@@ -1,0 +1,19 @@
+{
+  "_fixture": "hello_harness_control",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "scripts/fake-pi.mjs's control room. Same shape, and it omits workspace_path where the real gateway sends it.",
+  "direction": "fake-pi/ctrl → relay",
+  "raw": "{\"type\":\"hello\",\"pubkey\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"room_id\":\"ctrl\",\"room_meta\":{\"name\":\"capture-machine control\",\"cwd\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi\",\"role\":\"control\",\"working\":false}}",
+  "frame": {
+    "type": "hello",
+    "pubkey": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "room_id": "ctrl",
+    "room_meta": {
+      "name": "capture-machine control",
+      "cwd": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi",
+      "role": "control",
+      "working": false
+    }
+  }
+}

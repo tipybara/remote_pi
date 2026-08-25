@@ -1,0 +1,19 @@
+{
+  "_fixture": "inner_pair_error",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "The same token replayed: consumed on first use.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoicGFpcl9lcnJvciIsImluX3JlcGx5X3RvIjoiYzdlN2ZmZGYtYzM3OC00M2UwLWE3NTMtZTZlNWFiZWYyNmNjIiwiY29kZSI6InRva2VuX2NvbnN1bWVkIiwibWVzc2FnZSI6ImZha2UtcGk6IHRva2VuX2NvbnN1bWVkLiBSdW4gYHFyYCBmb3IgYSBmcmVzaCBwYXlsb2FkLiJ9\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoicGFpcl9lcnJvciIsImluX3JlcGx5X3RvIjoiYzdlN2ZmZGYtYzM3OC00M2UwLWE3NTMtZTZlNWFiZWYyNmNjIiwiY29kZSI6InRva2VuX2NvbnN1bWVkIiwibWVzc2FnZSI6ImZha2UtcGk6IHRva2VuX2NvbnN1bWVkLiBSdW4gYHFyYCBmb3IgYSBmcmVzaCBwYXlsb2FkLiJ9"
+  },
+  "inner_raw": "{\"type\":\"pair_error\",\"in_reply_to\":\"c7e7ffdf-c378-43e0-a753-e6e5abef26cc\",\"code\":\"token_consumed\",\"message\":\"fake-pi: token_consumed. Run `qr` for a fresh payload.\"}",
+  "inner": {
+    "type": "pair_error",
+    "in_reply_to": "c7e7ffdf-c378-43e0-a753-e6e5abef26cc",
+    "code": "token_consumed",
+    "message": "fake-pi: token_consumed. Run `qr` for a fresh payload."
+  }
+}

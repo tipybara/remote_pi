@@ -1,0 +1,19 @@
+{
+  "_fixture": "inner_action_error_rename",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "A rename carrying a revision older than the Pi's.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX2Vycm9yIiwiaW5fcmVwbHlfdG8iOiJlM2M3OTQyYi02OThiLTQzMzktYjYzOS0xNGJhZDNlNWU0NjgiLCJhY3Rpb24iOiJzZXNzaW9uX3JlbmFtZSIsImVycm9yIjoic3RhbGUgbmFtZSByZXZpc2lvbiDigJQgdGhpcyBzZXNzaW9uIHdhcyByZW5hbWVkIGVsc2V3aGVyZSJ9\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX2Vycm9yIiwiaW5fcmVwbHlfdG8iOiJlM2M3OTQyYi02OThiLTQzMzktYjYzOS0xNGJhZDNlNWU0NjgiLCJhY3Rpb24iOiJzZXNzaW9uX3JlbmFtZSIsImVycm9yIjoic3RhbGUgbmFtZSByZXZpc2lvbiDigJQgdGhpcyBzZXNzaW9uIHdhcyByZW5hbWVkIGVsc2V3aGVyZSJ9"
+  },
+  "inner_raw": "{\"type\":\"action_error\",\"in_reply_to\":\"e3c7942b-698b-4339-b639-14bad3e5e468\",\"action\":\"session_rename\",\"error\":\"stale name revision — this session was renamed elsewhere\"}",
+  "inner": {
+    "type": "action_error",
+    "in_reply_to": "e3c7942b-698b-4339-b639-14bad3e5e468",
+    "action": "session_rename",
+    "error": "stale name revision — this session was renamed elsewhere"
+  }
+}

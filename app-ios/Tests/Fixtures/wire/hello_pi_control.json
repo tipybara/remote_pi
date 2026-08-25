@@ -1,0 +1,19 @@
+{
+  "_fixture": "hello_pi_control",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "The REAL pi-extension Gateway (daemon/gateway.ts) opening its ctrl room. Note the ABSENT session_id and name_rev: a control room has no session identity.",
+  "direction": "gateway/ctrl → relay",
+  "raw": "{\"type\":\"hello\",\"pubkey\":\"5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=\",\"room_id\":\"ctrl\",\"room_meta\":{\"role\":\"control\",\"name\":\"machine control\",\"cwd\":\"/Users/yang/workspace/remote_pi/pi-extension\",\"workspace_path\":\"/Users/yang/workspace/remote_pi/pi-extension\"}}",
+  "frame": {
+    "type": "hello",
+    "pubkey": "5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=",
+    "room_id": "ctrl",
+    "room_meta": {
+      "role": "control",
+      "name": "machine control",
+      "cwd": "/Users/yang/workspace/remote_pi/pi-extension",
+      "workspace_path": "/Users/yang/workspace/remote_pi/pi-extension"
+    }
+  }
+}

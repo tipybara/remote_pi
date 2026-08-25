@@ -1,0 +1,19 @@
+{
+  "_fixture": "room_announced_control",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "The gateway's ctrl room as the relay announces it. Note role and the absent session_id.",
+  "direction": "app/main ← relay",
+  "raw": "{\"cwd\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi\",\"name\":\"capture-machine control\",\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"role\":\"control\",\"room_id\":\"ctrl\",\"started_at\":1787617931490,\"type\":\"room_announced\",\"working\":false,\"workspace_path\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi\"}",
+  "frame": {
+    "cwd": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi",
+    "name": "capture-machine control",
+    "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "role": "control",
+    "room_id": "ctrl",
+    "started_at": 1787617931490,
+    "type": "room_announced",
+    "working": false,
+    "workspace_path": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi"
+  }
+}

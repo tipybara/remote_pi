@@ -1,0 +1,26 @@
+{
+  "_fixture": "control_reply_envelope_as_gateway_writes_it",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "The offending envelope, verbatim: room is \"ctrl\", the gateway's own room, not the app's.",
+  "direction": "gateway/ctrl → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiJhOGYwNjZhZi0yMmNhLTQzYWMtYmQ2Ny0wZmVhZWMwZjJkMTYiLCJhY3Rpb24iOiJ3b3Jrc3BhY2VfbGlzdCIsIndvcmtzcGFjZXMiOlt7IndvcmtzcGFjZV9pZCI6IjcyOWNjMTFmIiwicGF0aCI6Ii9wcml2YXRlL3Zhci9mb2xkZXJzL3hiLzJkNDh6YmQxM3pqODNiNzZkNjg4bWs5cjAwMDBnbi9UL3JlbW90ZXBpLWNhcHR1cmUtVFEwamdYL2dhdGV3YXkvd29ya3NwYWNlIiwiZGlzcGxheV9uYW1lIjoid29ya3NwYWNlIn1dfQ==\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiJhOGYwNjZhZi0yMmNhLTQzYWMtYmQ2Ny0wZmVhZWMwZjJkMTYiLCJhY3Rpb24iOiJ3b3Jrc3BhY2VfbGlzdCIsIndvcmtzcGFjZXMiOlt7IndvcmtzcGFjZV9pZCI6IjcyOWNjMTFmIiwicGF0aCI6Ii9wcml2YXRlL3Zhci9mb2xkZXJzL3hiLzJkNDh6YmQxM3pqODNiNzZkNjg4bWs5cjAwMDBnbi9UL3JlbW90ZXBpLWNhcHR1cmUtVFEwamdYL2dhdGV3YXkvd29ya3NwYWNlIiwiZGlzcGxheV9uYW1lIjoid29ya3NwYWNlIn1dfQ=="
+  },
+  "inner_raw": "{\"type\":\"action_ok\",\"in_reply_to\":\"a8f066af-22ca-43ac-bd67-0feaec0f2d16\",\"action\":\"workspace_list\",\"workspaces\":[{\"workspace_id\":\"729cc11f\",\"path\":\"/private/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/gateway/workspace\",\"display_name\":\"workspace\"}]}",
+  "inner": {
+    "type": "action_ok",
+    "in_reply_to": "a8f066af-22ca-43ac-bd67-0feaec0f2d16",
+    "action": "workspace_list",
+    "workspaces": [
+      {
+        "workspace_id": "729cc11f",
+        "path": "/private/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/gateway/workspace",
+        "display_name": "workspace"
+      }
+    ]
+  }
+}

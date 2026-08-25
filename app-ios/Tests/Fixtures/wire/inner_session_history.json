@@ -1,0 +1,34 @@
+{
+  "_fixture": "inner_session_history",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Reply to session_sync.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoic2Vzc2lvbl9oaXN0b3J5IiwiaW5fcmVwbHlfdG8iOiIxNDU4Y2MzYS0xYTFiLTQwNjItYjhjYy03YTVlNDVmMTNlMmIiLCJzZXNzaW9uX3N0YXJ0ZWRfYXQiOjE3ODc2MTc5MzE0NjcsImV2ZW50cyI6W3sidHMiOjE3ODc2MTc5MzIwMDIsInR5cGUiOiJ1c2VyX2lucHV0IiwiaWQiOiIzYWQ4ZTI3ZS00NzZiLTRhMmQtYWM4MS1mNmMzYWQ4NGY0ZTUiLCJ0ZXh0Ijoid2lyZSBjb25mb3JtYW5jZSBjYXB0dXJlIOKAlCBoZWxsbyBmcm9tIHRoZSBhcHAifSx7InRzIjoxNzg3NjE3OTMyNjM1LCJ0eXBlIjoiYWdlbnRfbWVzc2FnZSIsImluX3JlcGx5X3RvIjoiM2FkOGUyN2UtNDc2Yi00YTJkLWFjODEtZjZjM2FkODRmNGU1IiwidGV4dCI6IltmYWtlLXBpXSBzZXNzaW9uIFwiYXBpLXNlcnZlclwiIGluIC92YXIvZm9sZGVycy94Yi8yZDQ4emJkMTN6ajgzYjc2ZDY4OG1rOXIwMDAwZ24vVC9yZW1vdGVwaS1jYXB0dXJlLVRRMGpnWC9wcm9qL2FwaVxuc2Vzc2lvbl9pZD05OGMyNWZhOC1mZWNjLTQ3MzktOGVkNi02MzE5NWNkZGU2ZDFcbllvdSBzYWlkOiB3aXJlIGNvbmZvcm1hbmNlIGNhcHR1cmUg4oCUIGhlbGxvIGZyb20gdGhlIGFwcFxuTm8gbW9kZWwgaXMgcnVubmluZyDigJQgdGhpcyBoYXJuZXNzIGVjaG9lcyBzbyB0aGUgY2hhdCBpcyBub3QgZW1wdHkuIn1dLCJlb3MiOnRydWUsInRydW5jYXRlZCI6ZmFsc2V9\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoic2Vzc2lvbl9oaXN0b3J5IiwiaW5fcmVwbHlfdG8iOiIxNDU4Y2MzYS0xYTFiLTQwNjItYjhjYy03YTVlNDVmMTNlMmIiLCJzZXNzaW9uX3N0YXJ0ZWRfYXQiOjE3ODc2MTc5MzE0NjcsImV2ZW50cyI6W3sidHMiOjE3ODc2MTc5MzIwMDIsInR5cGUiOiJ1c2VyX2lucHV0IiwiaWQiOiIzYWQ4ZTI3ZS00NzZiLTRhMmQtYWM4MS1mNmMzYWQ4NGY0ZTUiLCJ0ZXh0Ijoid2lyZSBjb25mb3JtYW5jZSBjYXB0dXJlIOKAlCBoZWxsbyBmcm9tIHRoZSBhcHAifSx7InRzIjoxNzg3NjE3OTMyNjM1LCJ0eXBlIjoiYWdlbnRfbWVzc2FnZSIsImluX3JlcGx5X3RvIjoiM2FkOGUyN2UtNDc2Yi00YTJkLWFjODEtZjZjM2FkODRmNGU1IiwidGV4dCI6IltmYWtlLXBpXSBzZXNzaW9uIFwiYXBpLXNlcnZlclwiIGluIC92YXIvZm9sZGVycy94Yi8yZDQ4emJkMTN6ajgzYjc2ZDY4OG1rOXIwMDAwZ24vVC9yZW1vdGVwaS1jYXB0dXJlLVRRMGpnWC9wcm9qL2FwaVxuc2Vzc2lvbl9pZD05OGMyNWZhOC1mZWNjLTQ3MzktOGVkNi02MzE5NWNkZGU2ZDFcbllvdSBzYWlkOiB3aXJlIGNvbmZvcm1hbmNlIGNhcHR1cmUg4oCUIGhlbGxvIGZyb20gdGhlIGFwcFxuTm8gbW9kZWwgaXMgcnVubmluZyDigJQgdGhpcyBoYXJuZXNzIGVjaG9lcyBzbyB0aGUgY2hhdCBpcyBub3QgZW1wdHkuIn1dLCJlb3MiOnRydWUsInRydW5jYXRlZCI6ZmFsc2V9"
+  },
+  "inner_raw": "{\"type\":\"session_history\",\"in_reply_to\":\"1458cc3a-1a1b-4062-b8cc-7a5e45f13e2b\",\"session_started_at\":1787617931467,\"events\":[{\"ts\":1787617932002,\"type\":\"user_input\",\"id\":\"3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5\",\"text\":\"wire conformance capture — hello from the app\"},{\"ts\":1787617932635,\"type\":\"agent_message\",\"in_reply_to\":\"3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5\",\"text\":\"[fake-pi] session \\\"api-server\\\" in /var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\\nsession_id=98c25fa8-fecc-4739-8ed6-63195cdde6d1\\nYou said: wire conformance capture — hello from the app\\nNo model is running — this harness echoes so the chat is not empty.\"}],\"eos\":true,\"truncated\":false}",
+  "inner": {
+    "type": "session_history",
+    "in_reply_to": "1458cc3a-1a1b-4062-b8cc-7a5e45f13e2b",
+    "session_started_at": 1787617931467,
+    "events": [
+      {
+        "ts": 1787617932002,
+        "type": "user_input",
+        "id": "3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5",
+        "text": "wire conformance capture — hello from the app"
+      },
+      {
+        "ts": 1787617932635,
+        "type": "agent_message",
+        "in_reply_to": "3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5",
+        "text": "[fake-pi] session \"api-server\" in /var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\nsession_id=98c25fa8-fecc-4739-8ed6-63195cdde6d1\nYou said: wire conformance capture — hello from the app\nNo model is running — this harness echoes so the chat is not empty."
+      }
+    ],
+    "eos": true,
+    "truncated": false
+  }
+}

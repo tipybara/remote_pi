@@ -1,0 +1,21 @@
+{
+  "_fixture": "control_action_ok_create_session_replay",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "REAL gateway: the SAME key replayed. Carries replayed:true and drops the other fields.",
+  "direction": "gateway/ctrl → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiJhMzc0YTQ4My1iYzFlLTRiZTUtYmYxZi1jYzYzY2M4YWRmMmIiLCJhY3Rpb24iOiJjcmVhdGVfc2Vzc2lvbiIsInNlc3Npb25faWQiOiI3ZDRiOGEyYi0yMzRhLTQ3NzEtOTBiYi03YjcwNTRlMmE1ZmUiLCJyZXBsYXllZCI6dHJ1ZX0=\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiJhMzc0YTQ4My1iYzFlLTRiZTUtYmYxZi1jYzYzY2M4YWRmMmIiLCJhY3Rpb24iOiJjcmVhdGVfc2Vzc2lvbiIsInNlc3Npb25faWQiOiI3ZDRiOGEyYi0yMzRhLTQ3NzEtOTBiYi03YjcwNTRlMmE1ZmUiLCJyZXBsYXllZCI6dHJ1ZX0="
+  },
+  "inner_raw": "{\"type\":\"action_ok\",\"in_reply_to\":\"a374a483-bc1e-4be5-bf1f-cc63cc8adf2b\",\"action\":\"create_session\",\"session_id\":\"7d4b8a2b-234a-4771-90bb-7b7054e2a5fe\",\"replayed\":true}",
+  "inner": {
+    "type": "action_ok",
+    "in_reply_to": "a374a483-bc1e-4be5-bf1f-cc63cc8adf2b",
+    "action": "create_session",
+    "session_id": "7d4b8a2b-234a-4771-90bb-7b7054e2a5fe",
+    "replayed": true
+  }
+}

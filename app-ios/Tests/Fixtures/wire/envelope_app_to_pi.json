@@ -1,0 +1,19 @@
+{
+  "_fixture": "envelope_app_to_pi",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "As the APP writes it: peer = destination, room = the destination's room.",
+  "direction": "app/main → relay",
+  "raw": "{\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"room\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"ct\":\"eyJ0eXBlIjoidXNlcl9tZXNzYWdlIiwiaWQiOiIzYWQ4ZTI3ZS00NzZiLTRhMmQtYWM4MS1mNmMzYWQ4NGY0ZTUiLCJ0ZXh0Ijoid2lyZSBjb25mb3JtYW5jZSBjYXB0dXJlIOKAlCBoZWxsbyBmcm9tIHRoZSBhcHAifQ==\"}",
+  "frame": {
+    "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "room": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+    "ct": "eyJ0eXBlIjoidXNlcl9tZXNzYWdlIiwiaWQiOiIzYWQ4ZTI3ZS00NzZiLTRhMmQtYWM4MS1mNmMzYWQ4NGY0ZTUiLCJ0ZXh0Ijoid2lyZSBjb25mb3JtYW5jZSBjYXB0dXJlIOKAlCBoZWxsbyBmcm9tIHRoZSBhcHAifQ=="
+  },
+  "inner_raw": "{\"type\":\"user_message\",\"id\":\"3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5\",\"text\":\"wire conformance capture — hello from the app\"}",
+  "inner": {
+    "type": "user_message",
+    "id": "3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5",
+    "text": "wire conformance capture — hello from the app"
+  }
+}

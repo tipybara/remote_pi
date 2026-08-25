@@ -1,0 +1,17 @@
+{
+  "_fixture": "inner_pong",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Reply to a Pi-liveness ping.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoicG9uZyIsImluX3JlcGx5X3RvIjoiNmUwNmQyMzMtYzI5Mi00ZmRlLTgyZGYtN2ExMTNkYWU3M2JlIn0=\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoicG9uZyIsImluX3JlcGx5X3RvIjoiNmUwNmQyMzMtYzI5Mi00ZmRlLTgyZGYtN2ExMTNkYWU3M2JlIn0="
+  },
+  "inner_raw": "{\"type\":\"pong\",\"in_reply_to\":\"6e06d233-c292-4fde-82df-7a113dae73be\"}",
+  "inner": {
+    "type": "pong",
+    "in_reply_to": "6e06d233-c292-4fde-82df-7a113dae73be"
+  }
+}

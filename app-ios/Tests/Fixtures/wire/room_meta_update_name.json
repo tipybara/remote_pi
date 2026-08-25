@@ -1,0 +1,16 @@
+{
+  "_fixture": "room_meta_update_name",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Pi → relay name patch with its revision. A rename is a patch, never a re-register.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"type\":\"room_meta_update\",\"room_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"meta\":{\"name\":\"renamed by capture\",\"name_rev\":1787617932638}}",
+  "frame": {
+    "type": "room_meta_update",
+    "room_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+    "meta": {
+      "name": "renamed by capture",
+      "name_rev": 1787617932638
+    }
+  }
+}

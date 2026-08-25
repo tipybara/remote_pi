@@ -1,0 +1,19 @@
+{
+  "_fixture": "room_meta_updated_stale_rejected",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Relay broadcast after a REJECTED name patch: the CURRENT name is re-sent, which is how the stale sender re-syncs. Compare with room_meta_update_stale_name.",
+  "direction": "app/main ← relay",
+  "raw": "{\"meta\":{\"name\":\"patched name\",\"name_rev\":1780000000001,\"thinking\":\"medium\",\"working\":true},\"peer\":\"qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=\",\"room_id\":\"5cb31035-1e21-41f1-912b-64e93857756f\",\"type\":\"room_meta_updated\"}",
+  "frame": {
+    "meta": {
+      "name": "patched name",
+      "name_rev": 1780000000001,
+      "thinking": "medium",
+      "working": true
+    },
+    "peer": "qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=",
+    "room_id": "5cb31035-1e21-41f1-912b-64e93857756f",
+    "type": "room_meta_updated"
+  }
+}

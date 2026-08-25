@@ -99,3 +99,65 @@ targets:
         NSPhotoLibraryAddUsageDescription:
           Remote Pi saves images your coding agent produces back to your photo
           library.
+
+  # End-to-end UI automation. Separate from RemotePiAppTests because these
+  # need a booted simulator, a running relay and a running `scripts/fake-pi.mjs`
+  # — they are a manual/CI E2E gate, not part of `swift test`. They also exist
+  # because host-side HID injection (AXe/idb) does not reach a simulator booted
+  # without Simulator.app, which is the only way this checkout can be driven.
+  RemotePiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/UITests
+    dependencies:
+      - target: RemotePi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: work.jacobmoura.remotepi.native.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+        SWIFT_VERSION: "6.0"
+        TEST_TARGET_NAME: RemotePi
+
+  RemotePiAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: App/Tests
+    dependencies:
+      - target: RemotePi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: work.jacobmoura.remotepi.native.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+        SWIFT_VERSION: "6.0"
+
+schemes:
+  # E2E: requires `relay` + `scripts/fake-pi.mjs` running. See STATUS.md.
+  RemotePiUITests:
+    build:
+      targets:
+        RemotePi: all
+        RemotePiUITests: [test]
+    test:
+      targets:
+        - RemotePiUITests
+      gatherCoverageData: false
+    run:
+      config: Debug
+
+  RemotePi:
+    build:
+      targets:
+        RemotePi: all
+        RemotePiAppTests: [test]
+    test:
+      targets:
+        - RemotePiAppTests
+      gatherCoverageData: false
+    run:
+      config: Debug

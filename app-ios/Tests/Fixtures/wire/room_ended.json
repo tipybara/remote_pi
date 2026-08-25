@@ -1,0 +1,14 @@
+{
+  "_fixture": "room_ended",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Last connection at a room went away.",
+  "direction": "app/main ← relay",
+  "raw": "{\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"room_id\":\"77672b55-b541-4a40-b2e0-7c40899a8f57\",\"since_ts\":1787617935415,\"type\":\"room_ended\"}",
+  "frame": {
+    "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "room_id": "77672b55-b541-4a40-b2e0-7c40899a8f57",
+    "since_ts": 1787617935415,
+    "type": "room_ended"
+  }
+}

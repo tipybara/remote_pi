@@ -1,0 +1,18 @@
+{
+  "_fixture": "inner_agent_chunk",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "One streaming delta.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoiYWdlbnRfY2h1bmsiLCJpbl9yZXBseV90byI6IjNhZDhlMjdlLTQ3NmItNGEyZC1hYzgxLWY2YzNhZDg0ZjRlNSIsImRlbHRhIjoiW2Zha2UtcGldIHNlc3Npb24gXCJhcGktc2VydmVyXCIgaW4gIn0=\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoiYWdlbnRfY2h1bmsiLCJpbl9yZXBseV90byI6IjNhZDhlMjdlLTQ3NmItNGEyZC1hYzgxLWY2YzNhZDg0ZjRlNSIsImRlbHRhIjoiW2Zha2UtcGldIHNlc3Npb24gXCJhcGktc2VydmVyXCIgaW4gIn0="
+  },
+  "inner_raw": "{\"type\":\"agent_chunk\",\"in_reply_to\":\"3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5\",\"delta\":\"[fake-pi] session \\\"api-server\\\" in \"}",
+  "inner": {
+    "type": "agent_chunk",
+    "in_reply_to": "3ad8e27e-476b-4a2d-ac81-f6c3ad84f4e5",
+    "delta": "[fake-pi] session \"api-server\" in "
+  }
+}

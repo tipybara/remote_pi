@@ -1,0 +1,16 @@
+{
+  "_fixture": "room_meta_update_equal_rev",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "An EQUAL name_rev. Rejected too: the gate is strictly-greater.",
+  "direction": "patch-pi/5cb31035-1e21-41f1-912b-64e93857756f → relay",
+  "raw": "{\"type\":\"room_meta_update\",\"room_id\":\"5cb31035-1e21-41f1-912b-64e93857756f\",\"meta\":{\"name\":\"equal-rev must lose\",\"name_rev\":1780000000001}}",
+  "frame": {
+    "type": "room_meta_update",
+    "room_id": "5cb31035-1e21-41f1-912b-64e93857756f",
+    "meta": {
+      "name": "equal-rev must lose",
+      "name_rev": 1780000000001
+    }
+  }
+}

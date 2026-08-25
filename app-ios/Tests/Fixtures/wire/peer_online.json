@@ -1,0 +1,12 @@
+{
+  "_fixture": "peer_online",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "A real offline → online transition. Carries no timestamp.",
+  "direction": "app/main ← relay",
+  "raw": "{\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"type\":\"peer_online\"}",
+  "frame": {
+    "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "type": "peer_online"
+  }
+}

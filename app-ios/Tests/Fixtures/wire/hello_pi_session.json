@@ -1,0 +1,23 @@
+{
+  "_fixture": "hello_pi_session",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "scripts/fake-pi.mjs opening a chat room: the full post-plan-61 room_meta.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"type\":\"hello\",\"pubkey\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"room_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"room_meta\":{\"name\":\"api-server\",\"cwd\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\",\"session_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"workspace_path\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\",\"name_rev\":1787617931468,\"model\":\"claude-sonnet-4.5\",\"thinking\":\"medium\",\"working\":false}}",
+  "frame": {
+    "type": "hello",
+    "pubkey": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "room_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+    "room_meta": {
+      "name": "api-server",
+      "cwd": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api",
+      "session_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+      "workspace_path": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api",
+      "name_rev": 1787617931468,
+      "model": "claude-sonnet-4.5",
+      "thinking": "medium",
+      "working": false
+    }
+  }
+}

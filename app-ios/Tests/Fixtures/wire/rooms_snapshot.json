@@ -1,0 +1,59 @@
+{
+  "_fixture": "rooms_snapshot",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "A populated rooms_check snapshot: one RoomMeta per distinct room.",
+  "direction": "app/main ← relay",
+  "raw": "{\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"rooms\":[{\"cwd\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\",\"model\":\"claude-sonnet-4.5\",\"name\":\"api-server\",\"name_rev\":1787617931468,\"room_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"session_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"started_at\":1787617931485,\"thinking\":\"medium\",\"working\":false,\"workspace_path\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\"},{\"cwd\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\",\"model\":\"claude-sonnet-4.5\",\"name\":\"api-worker\",\"name_rev\":1787617931469,\"room_id\":\"77672b55-b541-4a40-b2e0-7c40899a8f57\",\"session_id\":\"77672b55-b541-4a40-b2e0-7c40899a8f57\",\"started_at\":1787617931487,\"thinking\":\"medium\",\"working\":false,\"workspace_path\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\"},{\"cwd\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi\",\"name\":\"capture-machine control\",\"role\":\"control\",\"room_id\":\"ctrl\",\"started_at\":1787617931490,\"working\":false,\"workspace_path\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi\"},{\"cwd\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/web\",\"model\":\"claude-sonnet-4.5\",\"name\":\"web\",\"name_rev\":1787617931470,\"room_id\":\"98b3bf5d-4cc9-4d9b-b6e9-a579ba6f6651\",\"session_id\":\"98b3bf5d-4cc9-4d9b-b6e9-a579ba6f6651\",\"started_at\":1787617931489,\"thinking\":\"medium\",\"working\":false,\"workspace_path\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/web\"}],\"type\":\"rooms\"}",
+  "frame": {
+    "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "rooms": [
+      {
+        "cwd": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api",
+        "model": "claude-sonnet-4.5",
+        "name": "api-server",
+        "name_rev": 1787617931468,
+        "room_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+        "session_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+        "started_at": 1787617931485,
+        "thinking": "medium",
+        "working": false,
+        "workspace_path": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api"
+      },
+      {
+        "cwd": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api",
+        "model": "claude-sonnet-4.5",
+        "name": "api-worker",
+        "name_rev": 1787617931469,
+        "room_id": "77672b55-b541-4a40-b2e0-7c40899a8f57",
+        "session_id": "77672b55-b541-4a40-b2e0-7c40899a8f57",
+        "started_at": 1787617931487,
+        "thinking": "medium",
+        "working": false,
+        "workspace_path": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api"
+      },
+      {
+        "cwd": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi",
+        "name": "capture-machine control",
+        "role": "control",
+        "room_id": "ctrl",
+        "started_at": 1787617931490,
+        "working": false,
+        "workspace_path": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/fake-pi"
+      },
+      {
+        "cwd": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/web",
+        "model": "claude-sonnet-4.5",
+        "name": "web",
+        "name_rev": 1787617931470,
+        "room_id": "98b3bf5d-4cc9-4d9b-b6e9-a579ba6f6651",
+        "session_id": "98b3bf5d-4cc9-4d9b-b6e9-a579ba6f6651",
+        "started_at": 1787617931489,
+        "thinking": "medium",
+        "working": false,
+        "workspace_path": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/web"
+      }
+    ],
+    "type": "rooms"
+  }
+}

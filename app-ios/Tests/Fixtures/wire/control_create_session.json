@@ -1,0 +1,22 @@
+{
+  "_fixture": "control_create_session",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "App → gateway. background is always true; idempotency_key is minted once per user intent.",
+  "direction": "app/main → relay",
+  "raw": "{\"peer\":\"5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoiY3JlYXRlX3Nlc3Npb24iLCJpZCI6IjVjYWJkZTA3LTliMmUtNDllMC04MzJiLWEyZTI0ZjFlZTI3MCIsImlkZW1wb3RlbmN5X2tleSI6IjBhMTBiOGQwLWMwZGUtNDhlNi1hYmY5LTVlMTM0NGMzYzEzMyIsIndvcmtzcGFjZV9pZCI6IjcyOWNjMTFmIiwiZGlzcGxheV9uYW1lIjoiY3JlYXRlZCBieSBjYXB0dXJlIiwiYmFja2dyb3VuZCI6dHJ1ZX0=\"}",
+  "frame": {
+    "peer": "5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoiY3JlYXRlX3Nlc3Npb24iLCJpZCI6IjVjYWJkZTA3LTliMmUtNDllMC04MzJiLWEyZTI0ZjFlZTI3MCIsImlkZW1wb3RlbmN5X2tleSI6IjBhMTBiOGQwLWMwZGUtNDhlNi1hYmY5LTVlMTM0NGMzYzEzMyIsIndvcmtzcGFjZV9pZCI6IjcyOWNjMTFmIiwiZGlzcGxheV9uYW1lIjoiY3JlYXRlZCBieSBjYXB0dXJlIiwiYmFja2dyb3VuZCI6dHJ1ZX0="
+  },
+  "inner_raw": "{\"type\":\"create_session\",\"id\":\"5cabde07-9b2e-49e0-832b-a2e24f1ee270\",\"idempotency_key\":\"0a10b8d0-c0de-48e6-abf9-5e1344c3c133\",\"workspace_id\":\"729cc11f\",\"display_name\":\"created by capture\",\"background\":true}",
+  "inner": {
+    "type": "create_session",
+    "id": "5cabde07-9b2e-49e0-832b-a2e24f1ee270",
+    "idempotency_key": "0a10b8d0-c0de-48e6-abf9-5e1344c3c133",
+    "workspace_id": "729cc11f",
+    "display_name": "created by capture",
+    "background": true
+  }
+}

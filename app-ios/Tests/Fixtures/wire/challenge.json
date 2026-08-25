@@ -1,0 +1,12 @@
+{
+  "_fixture": "challenge",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Relay step 2, on the app's own connection. 32 random bytes, standard base64.",
+  "direction": "app/main ← relay",
+  "raw": "{\"type\":\"challenge\",\"nonce\":\"cUUSkWTxDFj9hDZ40kWjGNZzuDY41BXyZDNsS6Q/OEs=\"}",
+  "frame": {
+    "type": "challenge",
+    "nonce": "cUUSkWTxDFj9hDZ40kWjGNZzuDY41BXyZDNsS6Q/OEs="
+  }
+}

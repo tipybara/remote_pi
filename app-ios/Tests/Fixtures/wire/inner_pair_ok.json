@@ -1,0 +1,29 @@
+{
+  "_fixture": "inner_pair_ok",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "fake-pi's reply, with the plan-61 identity fields.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoicGFpcl9vayIsImluX3JlcGx5X3RvIjoiNDY5ZDc4ZGEtMjdkMi00NmJiLTliYjEtMmVlYWJiNWY3NGJlIiwic2Vzc2lvbl9uYW1lIjoiYXBpLXNlcnZlciIsInNlc3Npb25fc3RhcnRlZF9hdCI6MTc4NzYxNzkzMTQ2Nywicm9vbV9pZCI6Ijk4YzI1ZmE4LWZlY2MtNDczOS04ZWQ2LTYzMTk1Y2RkZTZkMSIsInNlc3Npb25faWQiOiI5OGMyNWZhOC1mZWNjLTQ3MzktOGVkNi02MzE5NWNkZGU2ZDEiLCJ3b3Jrc3BhY2VfcGF0aCI6Ii92YXIvZm9sZGVycy94Yi8yZDQ4emJkMTN6ajgzYjc2ZDY4OG1rOXIwMDAwZ24vVC9yZW1vdGVwaS1jYXB0dXJlLVRRMGpnWC9wcm9qL2FwaSIsImRpc3BsYXlfbmFtZSI6ImFwaS1zZXJ2ZXIiLCJuYW1lX3JldiI6MTc4NzYxNzkzMTQ2OCwiaGFybmVzcyI6eyJuYW1lIjoiZmFrZS1waSBoYXJuZXNzIiwidmVyc2lvbiI6IjAuMC4wIn0sImhvc3RuYW1lIjoiY2FwdHVyZS1tYWNoaW5lIn0=\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoicGFpcl9vayIsImluX3JlcGx5X3RvIjoiNDY5ZDc4ZGEtMjdkMi00NmJiLTliYjEtMmVlYWJiNWY3NGJlIiwic2Vzc2lvbl9uYW1lIjoiYXBpLXNlcnZlciIsInNlc3Npb25fc3RhcnRlZF9hdCI6MTc4NzYxNzkzMTQ2Nywicm9vbV9pZCI6Ijk4YzI1ZmE4LWZlY2MtNDczOS04ZWQ2LTYzMTk1Y2RkZTZkMSIsInNlc3Npb25faWQiOiI5OGMyNWZhOC1mZWNjLTQ3MzktOGVkNi02MzE5NWNkZGU2ZDEiLCJ3b3Jrc3BhY2VfcGF0aCI6Ii92YXIvZm9sZGVycy94Yi8yZDQ4emJkMTN6ajgzYjc2ZDY4OG1rOXIwMDAwZ24vVC9yZW1vdGVwaS1jYXB0dXJlLVRRMGpnWC9wcm9qL2FwaSIsImRpc3BsYXlfbmFtZSI6ImFwaS1zZXJ2ZXIiLCJuYW1lX3JldiI6MTc4NzYxNzkzMTQ2OCwiaGFybmVzcyI6eyJuYW1lIjoiZmFrZS1waSBoYXJuZXNzIiwidmVyc2lvbiI6IjAuMC4wIn0sImhvc3RuYW1lIjoiY2FwdHVyZS1tYWNoaW5lIn0="
+  },
+  "inner_raw": "{\"type\":\"pair_ok\",\"in_reply_to\":\"469d78da-27d2-46bb-9bb1-2eeabb5f74be\",\"session_name\":\"api-server\",\"session_started_at\":1787617931467,\"room_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"session_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"workspace_path\":\"/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api\",\"display_name\":\"api-server\",\"name_rev\":1787617931468,\"harness\":{\"name\":\"fake-pi harness\",\"version\":\"0.0.0\"},\"hostname\":\"capture-machine\"}",
+  "inner": {
+    "type": "pair_ok",
+    "in_reply_to": "469d78da-27d2-46bb-9bb1-2eeabb5f74be",
+    "session_name": "api-server",
+    "session_started_at": 1787617931467,
+    "room_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+    "session_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+    "workspace_path": "/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/proj/api",
+    "display_name": "api-server",
+    "name_rev": 1787617931468,
+    "harness": {
+      "name": "fake-pi harness",
+      "version": "0.0.0"
+    },
+    "hostname": "capture-machine"
+  }
+}

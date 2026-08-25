@@ -1,0 +1,18 @@
+{
+  "_fixture": "control_workspace_list",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "App → gateway. No paths on the wire, so this takes no arguments.",
+  "direction": "app/main → relay",
+  "raw": "{\"peer\":\"5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoid29ya3NwYWNlX2xpc3QiLCJpZCI6ImE4ZjA2NmFmLTIyY2EtNDNhYy1iZDY3LTBmZWFlYzBmMmQxNiJ9\"}",
+  "frame": {
+    "peer": "5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoid29ya3NwYWNlX2xpc3QiLCJpZCI6ImE4ZjA2NmFmLTIyY2EtNDNhYy1iZDY3LTBmZWFlYzBmMmQxNiJ9"
+  },
+  "inner_raw": "{\"type\":\"workspace_list\",\"id\":\"a8f066af-22ca-43ac-bd67-0feaec0f2d16\"}",
+  "inner": {
+    "type": "workspace_list",
+    "id": "a8f066af-22ca-43ac-bd67-0feaec0f2d16"
+  }
+}

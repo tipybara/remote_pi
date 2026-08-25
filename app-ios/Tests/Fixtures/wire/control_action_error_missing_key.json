@@ -1,0 +1,20 @@
+{
+  "_fixture": "control_action_error_missing_key",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "REAL gateway: a mutating action with no idempotency_key is refused, not defaulted.",
+  "direction": "gateway/ctrl → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX2Vycm9yIiwiaW5fcmVwbHlfdG8iOiJkN2UyMzdhMy01MGI0LTRmOTktOTY0MS1lNWI1NjhhYjRiMTkiLCJhY3Rpb24iOiJjcmVhdGVfc2Vzc2lvbiIsImVycm9yIjoiaWRlbXBvdGVuY3lfa2V5IG11c3QgYmUgYSBub24tZW1wdHkgc3RyaW5nIn0=\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX2Vycm9yIiwiaW5fcmVwbHlfdG8iOiJkN2UyMzdhMy01MGI0LTRmOTktOTY0MS1lNWI1NjhhYjRiMTkiLCJhY3Rpb24iOiJjcmVhdGVfc2Vzc2lvbiIsImVycm9yIjoiaWRlbXBvdGVuY3lfa2V5IG11c3QgYmUgYSBub24tZW1wdHkgc3RyaW5nIn0="
+  },
+  "inner_raw": "{\"type\":\"action_error\",\"in_reply_to\":\"d7e237a3-50b4-4f99-9641-e5b568ab4b19\",\"action\":\"create_session\",\"error\":\"idempotency_key must be a non-empty string\"}",
+  "inner": {
+    "type": "action_error",
+    "in_reply_to": "d7e237a3-50b4-4f99-9641-e5b568ab4b19",
+    "action": "create_session",
+    "error": "idempotency_key must be a non-empty string"
+  }
+}

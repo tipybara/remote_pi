@@ -1,0 +1,18 @@
+{
+  "_fixture": "inner_action_ok_rename",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "fake-pi's action_ok for session_rename.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiI2NmI4NWQ5Ni1hN2ZkLTQxNWItYTVjOC02MDNlNDkwYjYwMDkiLCJhY3Rpb24iOiJzZXNzaW9uX3JlbmFtZSJ9\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiI2NmI4NWQ5Ni1hN2ZkLTQxNWItYTVjOC02MDNlNDkwYjYwMDkiLCJhY3Rpb24iOiJzZXNzaW9uX3JlbmFtZSJ9"
+  },
+  "inner_raw": "{\"type\":\"action_ok\",\"in_reply_to\":\"66b85d96-a7fd-415b-a5c8-603e490b6009\",\"action\":\"session_rename\"}",
+  "inner": {
+    "type": "action_ok",
+    "in_reply_to": "66b85d96-a7fd-415b-a5c8-603e490b6009",
+    "action": "session_rename"
+  }
+}

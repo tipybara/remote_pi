@@ -1,0 +1,23 @@
+{
+  "_fixture": "control_action_ok_create_session",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "REAL gateway: the first serve of an idempotency key.",
+  "direction": "gateway/ctrl → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiI1Y2FiZGUwNy05YjJlLTQ5ZTAtODMyYi1hMmUyNGYxZWUyNzAiLCJhY3Rpb24iOiJjcmVhdGVfc2Vzc2lvbiIsInNlc3Npb25faWQiOiI3ZDRiOGEyYi0yMzRhLTQ3NzEtOTBiYi03YjcwNTRlMmE1ZmUiLCJ3b3Jrc3BhY2VfaWQiOiI3MjljYzExZiIsImRpc3BsYXlfbmFtZSI6ImNyZWF0ZWQgYnkgY2FwdHVyZSIsInBhdGgiOiIvcHJpdmF0ZS92YXIvZm9sZGVycy94Yi8yZDQ4emJkMTN6ajgzYjc2ZDY4OG1rOXIwMDAwZ24vVC9yZW1vdGVwaS1jYXB0dXJlLVRRMGpnWC9nYXRld2F5L3dvcmtzcGFjZSJ9\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiI1Y2FiZGUwNy05YjJlLTQ5ZTAtODMyYi1hMmUyNGYxZWUyNzAiLCJhY3Rpb24iOiJjcmVhdGVfc2Vzc2lvbiIsInNlc3Npb25faWQiOiI3ZDRiOGEyYi0yMzRhLTQ3NzEtOTBiYi03YjcwNTRlMmE1ZmUiLCJ3b3Jrc3BhY2VfaWQiOiI3MjljYzExZiIsImRpc3BsYXlfbmFtZSI6ImNyZWF0ZWQgYnkgY2FwdHVyZSIsInBhdGgiOiIvcHJpdmF0ZS92YXIvZm9sZGVycy94Yi8yZDQ4emJkMTN6ajgzYjc2ZDY4OG1rOXIwMDAwZ24vVC9yZW1vdGVwaS1jYXB0dXJlLVRRMGpnWC9nYXRld2F5L3dvcmtzcGFjZSJ9"
+  },
+  "inner_raw": "{\"type\":\"action_ok\",\"in_reply_to\":\"5cabde07-9b2e-49e0-832b-a2e24f1ee270\",\"action\":\"create_session\",\"session_id\":\"7d4b8a2b-234a-4771-90bb-7b7054e2a5fe\",\"workspace_id\":\"729cc11f\",\"display_name\":\"created by capture\",\"path\":\"/private/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/gateway/workspace\"}",
+  "inner": {
+    "type": "action_ok",
+    "in_reply_to": "5cabde07-9b2e-49e0-832b-a2e24f1ee270",
+    "action": "create_session",
+    "session_id": "7d4b8a2b-234a-4771-90bb-7b7054e2a5fe",
+    "workspace_id": "729cc11f",
+    "display_name": "created by capture",
+    "path": "/private/var/folders/xb/2d48zbd13zj83b76d688mk9r0000gn/T/remotepi-capture-TQ0jgX/gateway/workspace"
+  }
+}

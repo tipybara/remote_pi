@@ -1,0 +1,13 @@
+{
+  "_fixture": "peer_offline",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Whole peer gone; since_ts in ms.",
+  "direction": "app/main ← relay",
+  "raw": "{\"peer\":\"qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=\",\"since_ts\":1787617935619,\"type\":\"peer_offline\"}",
+  "frame": {
+    "peer": "qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=",
+    "since_ts": 1787617935619,
+    "type": "peer_offline"
+  }
+}

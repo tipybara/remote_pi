@@ -1,0 +1,13 @@
+{
+  "_fixture": "rooms_empty",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "rooms_check answered before the Pi registered anything.",
+  "direction": "app/main ← relay",
+  "raw": "{\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"rooms\":[],\"type\":\"rooms\"}",
+  "frame": {
+    "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "rooms": [],
+    "type": "rooms"
+  }
+}

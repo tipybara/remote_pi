@@ -1,0 +1,20 @@
+{
+  "_fixture": "control_action_error_unknown_session",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "REAL gateway: session_stop against an id it has never catalogued.",
+  "direction": "gateway/ctrl → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX2Vycm9yIiwiaW5fcmVwbHlfdG8iOiIxOTQxZDgzNC00MzhjLTQzMGYtODc4OC03ZGZmNzk1MmU4MTkiLCJhY3Rpb24iOiJzZXNzaW9uX3N0b3AiLCJlcnJvciI6InVua25vd24gc2Vzc2lvbjogbm8tc3VjaC1zZXNzaW9uIn0=\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX2Vycm9yIiwiaW5fcmVwbHlfdG8iOiIxOTQxZDgzNC00MzhjLTQzMGYtODc4OC03ZGZmNzk1MmU4MTkiLCJhY3Rpb24iOiJzZXNzaW9uX3N0b3AiLCJlcnJvciI6InVua25vd24gc2Vzc2lvbjogbm8tc3VjaC1zZXNzaW9uIn0="
+  },
+  "inner_raw": "{\"type\":\"action_error\",\"in_reply_to\":\"1941d834-438c-430f-8788-7dff7952e819\",\"action\":\"session_stop\",\"error\":\"unknown session: no-such-session\"}",
+  "inner": {
+    "type": "action_error",
+    "in_reply_to": "1941d834-438c-430f-8788-7dff7952e819",
+    "action": "session_stop",
+    "error": "unknown session: no-such-session"
+  }
+}

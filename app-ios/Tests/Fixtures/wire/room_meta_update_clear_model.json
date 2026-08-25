@@ -1,0 +1,15 @@
+{
+  "_fixture": "room_meta_update_clear_model",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Pi → relay patch clearing a nullable string with an explicit null.",
+  "direction": "patch-pi/5cb31035-1e21-41f1-912b-64e93857756f → relay",
+  "raw": "{\"type\":\"room_meta_update\",\"room_id\":\"5cb31035-1e21-41f1-912b-64e93857756f\",\"meta\":{\"model\":null}}",
+  "frame": {
+    "type": "room_meta_update",
+    "room_id": "5cb31035-1e21-41f1-912b-64e93857756f",
+    "meta": {
+      "model": null
+    }
+  }
+}

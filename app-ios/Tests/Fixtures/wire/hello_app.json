@@ -1,0 +1,13 @@
+{
+  "_fixture": "hello_app",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "The app's hello. room_id is always \"main\" and no room_meta is published.",
+  "direction": "app/main → relay",
+  "raw": "{\"type\":\"hello\",\"pubkey\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"room_id\":\"main\"}",
+  "frame": {
+    "type": "hello",
+    "pubkey": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "room_id": "main"
+  }
+}

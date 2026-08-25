@@ -1,0 +1,21 @@
+{
+  "_fixture": "inner_session_rename",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "App → Pi. rev is the revision the device last SAW.",
+  "direction": "app/main → relay",
+  "raw": "{\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"room\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"ct\":\"eyJ0eXBlIjoic2Vzc2lvbl9yZW5hbWUiLCJpZCI6IjY2Yjg1ZDk2LWE3ZmQtNDE1Yi1hNWM4LTYwM2U0OTBiNjAwOSIsInNlc3Npb25faWQiOiI5OGMyNWZhOC1mZWNjLTQ3MzktOGVkNi02MzE5NWNkZGU2ZDEiLCJkaXNwbGF5X25hbWUiOiJyZW5hbWVkIGJ5IGNhcHR1cmUiLCJyZXYiOjE3ODc2MTc5MzE0Njh9\"}",
+  "frame": {
+    "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+    "room": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+    "ct": "eyJ0eXBlIjoic2Vzc2lvbl9yZW5hbWUiLCJpZCI6IjY2Yjg1ZDk2LWE3ZmQtNDE1Yi1hNWM4LTYwM2U0OTBiNjAwOSIsInNlc3Npb25faWQiOiI5OGMyNWZhOC1mZWNjLTQ3MzktOGVkNi02MzE5NWNkZGU2ZDEiLCJkaXNwbGF5X25hbWUiOiJyZW5hbWVkIGJ5IGNhcHR1cmUiLCJyZXYiOjE3ODc2MTc5MzE0Njh9"
+  },
+  "inner_raw": "{\"type\":\"session_rename\",\"id\":\"66b85d96-a7fd-415b-a5c8-603e490b6009\",\"session_id\":\"98c25fa8-fecc-4739-8ed6-63195cdde6d1\",\"display_name\":\"renamed by capture\",\"rev\":1787617931468}",
+  "inner": {
+    "type": "session_rename",
+    "id": "66b85d96-a7fd-415b-a5c8-603e490b6009",
+    "session_id": "98c25fa8-fecc-4739-8ed6-63195cdde6d1",
+    "display_name": "renamed by capture",
+    "rev": 1787617931468
+  }
+}

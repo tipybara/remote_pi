@@ -1,0 +1,20 @@
+{
+  "_fixture": "room_meta_updated_working",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Relay broadcast after a working-only patch: the post-patch FULL state. model, thinking, name and name_rev were NOT in the patch and are all still there.",
+  "direction": "app/ctrl ← relay",
+  "raw": "{\"meta\":{\"model\":\"claude-sonnet-4.5\",\"name\":\"patch-target\",\"name_rev\":1780000000000,\"thinking\":\"medium\",\"working\":true},\"peer\":\"qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=\",\"room_id\":\"5cb31035-1e21-41f1-912b-64e93857756f\",\"type\":\"room_meta_updated\"}",
+  "frame": {
+    "meta": {
+      "model": "claude-sonnet-4.5",
+      "name": "patch-target",
+      "name_rev": 1780000000000,
+      "thinking": "medium",
+      "working": true
+    },
+    "peer": "qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=",
+    "room_id": "5cb31035-1e21-41f1-912b-64e93857756f",
+    "type": "room_meta_updated"
+  }
+}

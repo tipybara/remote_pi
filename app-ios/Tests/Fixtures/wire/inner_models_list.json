@@ -1,0 +1,51 @@
+{
+  "_fixture": "inner_models_list",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "Reply to list_models.",
+  "direction": "fake-pi/98c25fa8-fecc-4739-8ed6-63195cdde6d1 → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"ct\":\"eyJ0eXBlIjoibW9kZWxzX2xpc3QiLCJpbl9yZXBseV90byI6IjYxOGRkYzI2LWYzNjgtNGU2Zi04YWMzLTgxMDNhZDllZjEyYiIsIm1vZGVscyI6W3siaWQiOiJjbGF1ZGUtc29ubmV0LTQuNSIsIm5hbWUiOiJDbGF1ZGUgU29ubmV0IDQuNSIsInByb3ZpZGVyIjoiYW50aHJvcGljIiwicmVhc29uaW5nIjp0cnVlLCJjb250ZXh0X3dpbmRvdyI6MjAwMDAwLCJ2aXNpb24iOnRydWV9LHsiaWQiOiJjbGF1ZGUtb3B1cy00LjciLCJuYW1lIjoiQ2xhdWRlIE9wdXMgNC43IiwicHJvdmlkZXIiOiJhbnRocm9waWMiLCJyZWFzb25pbmciOnRydWUsImNvbnRleHRfd2luZG93IjoyMDAwMDAsInZpc2lvbiI6dHJ1ZX0seyJpZCI6ImdwdC01LjQiLCJuYW1lIjoiR1BULTUuNCIsInByb3ZpZGVyIjoib3BlbmFpIiwicmVhc29uaW5nIjp0cnVlLCJjb250ZXh0X3dpbmRvdyI6NDAwMDAwLCJ2aXNpb24iOnRydWV9XSwiY3VycmVudCI6eyJpZCI6ImNsYXVkZS1zb25uZXQtNC41IiwibmFtZSI6IkNsYXVkZSBTb25uZXQgNC41IiwicHJvdmlkZXIiOiJhbnRocm9waWMiLCJyZWFzb25pbmciOnRydWUsImNvbnRleHRfd2luZG93IjoyMDAwMDAsInZpc2lvbiI6dHJ1ZX19\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "ct": "eyJ0eXBlIjoibW9kZWxzX2xpc3QiLCJpbl9yZXBseV90byI6IjYxOGRkYzI2LWYzNjgtNGU2Zi04YWMzLTgxMDNhZDllZjEyYiIsIm1vZGVscyI6W3siaWQiOiJjbGF1ZGUtc29ubmV0LTQuNSIsIm5hbWUiOiJDbGF1ZGUgU29ubmV0IDQuNSIsInByb3ZpZGVyIjoiYW50aHJvcGljIiwicmVhc29uaW5nIjp0cnVlLCJjb250ZXh0X3dpbmRvdyI6MjAwMDAwLCJ2aXNpb24iOnRydWV9LHsiaWQiOiJjbGF1ZGUtb3B1cy00LjciLCJuYW1lIjoiQ2xhdWRlIE9wdXMgNC43IiwicHJvdmlkZXIiOiJhbnRocm9waWMiLCJyZWFzb25pbmciOnRydWUsImNvbnRleHRfd2luZG93IjoyMDAwMDAsInZpc2lvbiI6dHJ1ZX0seyJpZCI6ImdwdC01LjQiLCJuYW1lIjoiR1BULTUuNCIsInByb3ZpZGVyIjoib3BlbmFpIiwicmVhc29uaW5nIjp0cnVlLCJjb250ZXh0X3dpbmRvdyI6NDAwMDAwLCJ2aXNpb24iOnRydWV9XSwiY3VycmVudCI6eyJpZCI6ImNsYXVkZS1zb25uZXQtNC41IiwibmFtZSI6IkNsYXVkZSBTb25uZXQgNC41IiwicHJvdmlkZXIiOiJhbnRocm9waWMiLCJyZWFzb25pbmciOnRydWUsImNvbnRleHRfd2luZG93IjoyMDAwMDAsInZpc2lvbiI6dHJ1ZX19"
+  },
+  "inner_raw": "{\"type\":\"models_list\",\"in_reply_to\":\"618ddc26-f368-4e6f-8ac3-8103ad9ef12b\",\"models\":[{\"id\":\"claude-sonnet-4.5\",\"name\":\"Claude Sonnet 4.5\",\"provider\":\"anthropic\",\"reasoning\":true,\"context_window\":200000,\"vision\":true},{\"id\":\"claude-opus-4.7\",\"name\":\"Claude Opus 4.7\",\"provider\":\"anthropic\",\"reasoning\":true,\"context_window\":200000,\"vision\":true},{\"id\":\"gpt-5.4\",\"name\":\"GPT-5.4\",\"provider\":\"openai\",\"reasoning\":true,\"context_window\":400000,\"vision\":true}],\"current\":{\"id\":\"claude-sonnet-4.5\",\"name\":\"Claude Sonnet 4.5\",\"provider\":\"anthropic\",\"reasoning\":true,\"context_window\":200000,\"vision\":true}}",
+  "inner": {
+    "type": "models_list",
+    "in_reply_to": "618ddc26-f368-4e6f-8ac3-8103ad9ef12b",
+    "models": [
+      {
+        "id": "claude-sonnet-4.5",
+        "name": "Claude Sonnet 4.5",
+        "provider": "anthropic",
+        "reasoning": true,
+        "context_window": 200000,
+        "vision": true
+      },
+      {
+        "id": "claude-opus-4.7",
+        "name": "Claude Opus 4.7",
+        "provider": "anthropic",
+        "reasoning": true,
+        "context_window": 200000,
+        "vision": true
+      },
+      {
+        "id": "gpt-5.4",
+        "name": "GPT-5.4",
+        "provider": "openai",
+        "reasoning": true,
+        "context_window": 400000,
+        "vision": true
+      }
+    ],
+    "current": {
+      "id": "claude-sonnet-4.5",
+      "name": "Claude Sonnet 4.5",
+      "provider": "anthropic",
+      "reasoning": true,
+      "context_window": 200000,
+      "vision": true
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "_fixture": "control_action_ok_session_list",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "REAL gateway: SessionEntry entries plus the live `running` flag. Note mode/desired/created_at, which the fake-pi harness does NOT send.",
+  "direction": "gateway/ctrl → relay",
+  "raw": "{\"peer\":\"y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=\",\"room\":\"ctrl\",\"ct\":\"eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiIzZjFjMzUwMi1kN2FjLTQ0MTQtYWY0Yi1hMTVhZDgxNTNmNmIiLCJhY3Rpb24iOiJzZXNzaW9uX2xpc3QiLCJzZXNzaW9ucyI6W3sic2Vzc2lvbl9pZCI6ImMxNGFmOWVhLTIwMTMtNDk2Yy1hMzk3LTRhYTgwMDY3MGRlNiIsIndvcmtzcGFjZV9pZCI6IjcyOWNjMTFmIiwiZGlzcGxheV9uYW1lIjoic2VlZGVkLXNlc3Npb24iLCJtb2RlIjoiYmFja2dyb3VuZCIsImRlc2lyZWQiOiJydW5uaW5nIiwiY3JlYXRlZF9hdCI6MTc4MDAwMDAwMDAwMCwicnVubmluZyI6dHJ1ZX1dfQ==\"}",
+  "frame": {
+    "peer": "y1/INlJ6xbN7AiK5fyRQkR3x7K4+2kT262ccZC+Cf1c=",
+    "room": "ctrl",
+    "ct": "eyJ0eXBlIjoiYWN0aW9uX29rIiwiaW5fcmVwbHlfdG8iOiIzZjFjMzUwMi1kN2FjLTQ0MTQtYWY0Yi1hMTVhZDgxNTNmNmIiLCJhY3Rpb24iOiJzZXNzaW9uX2xpc3QiLCJzZXNzaW9ucyI6W3sic2Vzc2lvbl9pZCI6ImMxNGFmOWVhLTIwMTMtNDk2Yy1hMzk3LTRhYTgwMDY3MGRlNiIsIndvcmtzcGFjZV9pZCI6IjcyOWNjMTFmIiwiZGlzcGxheV9uYW1lIjoic2VlZGVkLXNlc3Npb24iLCJtb2RlIjoiYmFja2dyb3VuZCIsImRlc2lyZWQiOiJydW5uaW5nIiwiY3JlYXRlZF9hdCI6MTc4MDAwMDAwMDAwMCwicnVubmluZyI6dHJ1ZX1dfQ=="
+  },
+  "inner_raw": "{\"type\":\"action_ok\",\"in_reply_to\":\"3f1c3502-d7ac-4414-af4b-a15ad8153f6b\",\"action\":\"session_list\",\"sessions\":[{\"session_id\":\"c14af9ea-2013-496c-a397-4aa800670de6\",\"workspace_id\":\"729cc11f\",\"display_name\":\"seeded-session\",\"mode\":\"background\",\"desired\":\"running\",\"created_at\":1780000000000,\"running\":true}]}",
+  "inner": {
+    "type": "action_ok",
+    "in_reply_to": "3f1c3502-d7ac-4414-af4b-a15ad8153f6b",
+    "action": "session_list",
+    "sessions": [
+      {
+        "session_id": "c14af9ea-2013-496c-a397-4aa800670de6",
+        "workspace_id": "729cc11f",
+        "display_name": "seeded-session",
+        "mode": "background",
+        "desired": "running",
+        "created_at": 1780000000000,
+        "running": true
+      }
+    ]
+  }
+}

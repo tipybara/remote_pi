@@ -1,0 +1,28 @@
+{
+  "_fixture": "presence_with_since_ts",
+  "_captured_at": "2026-08-25T00:32:11.271Z",
+  "_produced_by": "app-ios/Tests/Fixtures/capture-wire.mjs against a live relay on :3777",
+  "_note": "presence_check after a peer has disconnected: since_ts is the epoch-ms of the transition.",
+  "direction": "app/main ← relay",
+  "raw": "{\"states\":[{\"online\":false,\"peer\":\"X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=\",\"since_ts\":1787617935622},{\"online\":true,\"peer\":\"5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=\",\"since_ts\":null},{\"online\":false,\"peer\":\"qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=\",\"since_ts\":1787617935619}],\"type\":\"presence\"}",
+  "frame": {
+    "states": [
+      {
+        "online": false,
+        "peer": "X2xIWO5+CqzxjfCYR5IWjvYImX19CHvvrK9LBz3xCro=",
+        "since_ts": 1787617935622
+      },
+      {
+        "online": true,
+        "peer": "5MF/FLXBV1f41wk4HMUX1Zk2mC5mkd68tg1Ld2tkVUE=",
+        "since_ts": null
+      },
+      {
+        "online": false,
+        "peer": "qUP2T7gxpuX8JnfP+QFHuHD0gbpYluVyd85xSBC94I8=",
+        "since_ts": 1787617935619
+      }
+    ],
+    "type": "presence"
+  }
+}
