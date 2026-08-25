@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -169,11 +168,24 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let conn_id = registry.register(peer_id.clone(), room_meta, tx).await;
 
-    // Per-conn dedup state for control-frame replies. Suppress identical
-    // re-emits of `presence` (single cache slot — there's only one
-    // subscription set per conn) and `rooms` (one slot per target peer).
-    let mut last_presence_resp: Option<String> = None;
-    let mut last_rooms_resp: HashMap<String, String> = HashMap::new();
+    // Plan 62 state-sync audit — the per-conn dedup that used to live here
+    // (suppressing a `presence`/`rooms` reply identical to the previous one)
+    // is deliberately GONE, and must not come back.
+    //
+    // `presence_check` / `rooms_check` are POLLS: the client asks precisely
+    // because it suspects its own copy is wrong. Answering "same as last
+    // time, so silence" makes any client-side divergence within one
+    // connection unrecoverable — the client's only resync channel stops
+    // answering exactly when it is needed. That was the second half of the
+    // permanent false-offline bug: a client that locally marked a room dead
+    // (missed inner pings) could never learn it was alive again, because the
+    // relay's view had never changed and the check reply was suppressed.
+    //
+    // The firehose this dedup once guarded against was the app re-sending
+    // checks on every peer-storage mutation; plan 61 Phase 0 removed that
+    // churn at the source. Unsolicited pushes keep their own edge-triggered
+    // dedup in the registry (`was_offline_before` / `is_first_in_room`) —
+    // this change is only about answering direct questions.
 
     // ── 4. Routing loop ───────────────────────────────────────────────────
     // Send a WS Ping every 25 s so NAT/LB idle timers don't close the connection.
@@ -240,19 +252,12 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                         "states": states,
                                     })
                                     .to_string();
-                                    // Dedup: skip reply if identical to the
-                                    // previous one we sent on this conn. The
-                                    // first reply always goes through (cache
-                                    // is None until the first emit).
-                                    if last_presence_resp.as_deref() == Some(resp.as_str()) {
-                                        metrics.inc_presence_suppressed(1);
-                                    } else {
-                                        last_presence_resp = Some(resp.clone());
-                                        if sink.send(Message::Text(resp)).await.is_err() {
-                                            break;
-                                        }
-                                        metrics.inc_presence_emitted(1);
+                                    // A poll is always answered — see the
+                                    // audit note above the routing loop.
+                                    if sink.send(Message::Text(resp)).await.is_err() {
+                                        break;
                                     }
+                                    metrics.inc_presence_emitted(1);
                                 }
 
                                 // ── rooms control frames (plano 17) ──
@@ -271,14 +276,8 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                             "rooms": active_rooms,
                                         })
                                         .to_string();
-                                        // Dedup per (conn, target_peer):
-                                        // first reply always sent; subsequent
-                                        // identical snapshots dropped.
-                                        if last_rooms_resp.get(target_peer) == Some(&resp) {
-                                            metrics.inc_rooms_suppressed(1);
-                                            continue;
-                                        }
-                                        last_rooms_resp.insert(target_peer.clone(), resp.clone());
+                                        // A poll is always answered — see the
+                                        // audit note above the routing loop.
                                         if sink.send(Message::Text(resp)).await.is_err() {
                                             break 'routing;
                                         }

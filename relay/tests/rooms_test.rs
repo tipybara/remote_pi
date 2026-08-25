@@ -352,10 +352,16 @@ async fn room_meta_update_broadcasts_to_subscribers() {
     assert_eq!(v["meta"]["model"], "claude-haiku-4-5-20251001");
 }
 
-/// `rooms_check` dedup: an identical follow-up snapshot for the same target
-/// peer is suppressed by the relay (firehose-fix). First reply always sent.
+/// Plan 62 state-sync audit — `rooms_check` is a POLL and is ALWAYS answered.
+///
+/// This test used to assert suppression of an identical follow-up, and that
+/// contract was a design defect: a client that locally marked a room offline
+/// (missed inner pings) polls exactly when the relay's view has NOT changed —
+/// suppression starved the only resync channel and made the false-offline
+/// permanent. Pushes keep their edge-triggered dedup in the registry; direct
+/// questions get direct answers.
 #[tokio::test]
-async fn rooms_check_dedup_suppresses_identical_responses() {
+async fn rooms_check_always_answers_even_when_identical() {
     let port = start_relay().await;
     let sk_pi = random_key();
     use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
@@ -379,26 +385,26 @@ async fn rooms_check_dedup_suppresses_identical_responses() {
     assert_eq!(v1["type"], "rooms");
     assert_eq!(v1["peer"], peer_pi);
 
-    // Identical follow-up — suppressed.
+    // Identical follow-up — still answered, with the same contents.
     ws_app
         .send(Message::text(
             json!({"type": "rooms_check", "peers": [&peer_pi]}).to_string(),
         ))
         .await
         .unwrap();
-    let dup = tokio::time::timeout(tokio::time::Duration::from_millis(250), ws_app.next()).await;
-    assert!(
-        dup.is_err(),
-        "identical rooms reply must be suppressed, got: {:?}",
-        dup.ok()
-            .and_then(|m| m.and_then(|r| r.ok()))
-            .map(|m| m.into_text())
-    );
+    let second = tokio::time::timeout(tokio::time::Duration::from_secs(1), ws_app.next())
+        .await
+        .expect("an identical poll must still be answered")
+        .unwrap()
+        .unwrap();
+    let v2: serde_json::Value = serde_json::from_str(second.to_text().unwrap()).unwrap();
+    assert_eq!(v2["type"], "rooms");
+    assert_eq!(v2["peer"], peer_pi);
+    assert_eq!(v2["rooms"], v1["rooms"], "same state, same answer — but answered");
 }
 
 /// After a real room change (room_meta_update with a new model), the next
-/// `rooms_check` reply is distinct from the cached one and therefore is
-/// emitted, not suppressed.
+/// `rooms_check` reply carries the updated meta.
 #[tokio::test]
 async fn rooms_check_after_real_change_emits_new_snapshot() {
     let port = start_relay().await;

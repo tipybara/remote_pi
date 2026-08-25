@@ -246,11 +246,16 @@ async fn second_conn_same_peer_does_not_re_emit_peer_online() {
     );
 }
 
-/// `presence_check` dedup: if the snapshot reply is identical to the previous
-/// reply sent on the same WS conn, the relay suppresses it. The first reply
-/// always goes through.
+/// Plan 62 state-sync audit — `presence_check` is a POLL and is ALWAYS
+/// answered, even when the reply is byte-identical to the previous one.
+///
+/// This test used to assert the opposite (suppression), and that contract was
+/// a design defect: the client polls precisely when it suspects its own copy
+/// is wrong, so "same as last time → silence" made client-side divergence
+/// unrecoverable within a connection. It was one half of the permanent
+/// false-offline bug (the other half was the clients' amputated revive path).
 #[tokio::test]
-async fn presence_check_dedup_suppresses_identical_responses() {
+async fn presence_check_always_answers_even_when_identical() {
     let port = start_relay().await;
     let sk_a = random_key();
     use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
@@ -273,25 +278,25 @@ async fn presence_check_dedup_suppresses_identical_responses() {
     let v1: serde_json::Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
     assert_eq!(v1["type"], "presence", "first reply must come through");
 
-    // Identical follow-up — suppressed.
+    // Identical follow-up — still answered. A poll is a question; the fact
+    // that the answer has not changed is itself the information the client
+    // needs to resync.
     ws_b.send(Message::text(
         json!({"type": "presence_check", "peers": [&peer_a]}).to_string(),
     ))
     .await
     .unwrap();
-    let dup = tokio::time::timeout(tokio::time::Duration::from_millis(250), ws_b.next()).await;
-    assert!(
-        dup.is_err(),
-        "identical presence reply must be suppressed, got: {:?}",
-        dup.ok()
-            .and_then(|m| m.and_then(|r| r.ok()))
-            .map(|m| m.into_text())
-    );
+    let second = tokio::time::timeout(tokio::time::Duration::from_secs(1), ws_b.next())
+        .await
+        .expect("an identical poll must still be answered")
+        .unwrap()
+        .unwrap();
+    let v2: serde_json::Value = serde_json::from_str(second.to_text().unwrap()).unwrap();
+    assert_eq!(v2["type"], "presence");
+    assert_eq!(v2["states"], v1["states"], "same state, same answer — but answered");
 }
 
-/// Changing the subscribed peer set (a real change) makes the next
-/// `presence_check` reply distinct, so it goes through after a dedup-suppressed
-/// run.
+/// Changing the queried peer set changes the reply contents accordingly.
 #[tokio::test]
 async fn presence_check_after_change_emits_new_snapshot() {
     let port = start_relay().await;
