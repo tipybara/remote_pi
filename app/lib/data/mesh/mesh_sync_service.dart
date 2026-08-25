@@ -36,6 +36,29 @@ class MeshSyncService extends ChangeNotifier {
   /// the next fetch loop instead.
   bool _publishing = false;
 
+  /// Revocation tombstones: `remote_epk`s (base64 **standard**, the
+  /// blob alphabet) the user removed and whose absence is therefore
+  /// authoritative over anything the relay still says.
+  ///
+  /// Exists because "relay is source of truth" and "revoke" are in
+  /// direct conflict for the duration of a revoke publish: the 409
+  /// retry re-fetches, and the apply of that fetch would write the
+  /// just-revoked peer back into local storage — which the retry then
+  /// re-reads and re-publishes, silently un-revoking (spec 06 T8). A
+  /// tombstone makes that write impossible instead of merely
+  /// improbable: [_replaceLocalCacheWith] refuses to materialise a
+  /// tombstoned member, and [_publishOnce] refuses to serialise one.
+  ///
+  /// Lifetime: until the relay ACKs a publish that carried it (the
+  /// revoke is now the relay's own state, so no fetch can contradict
+  /// it), or until the user pairs that machine again — a live local
+  /// record outranks a stale tombstone, otherwise a re-pair in the
+  /// same session could never be published. In-memory only: a revoke
+  /// that never reached the relay before the app was killed still
+  /// loses to the relay's blob on the next cold start, exactly as it
+  /// did before.
+  final Set<String> _revoked = <String>{};
+
   Timer? _pollTimer;
   bool _disposed = false;
 
@@ -123,6 +146,14 @@ class MeshSyncService extends ChangeNotifier {
     };
     final keep = <String>{};
     for (final m in blob.members) {
+      if (_revoked.contains(toStandardB64(m.remoteEpk))) {
+        // Revoked locally, still listed by the relay — our version of
+        // this member simply hasn't landed yet (or lost the race and is
+        // about to be re-published). Leaving it out of `keep` also
+        // removes any local record, so the revoke can't come back
+        // through the retry that follows a 409.
+        continue;
+      }
       keep.add(m.remoteEpk);
       final prev = existing[m.remoteEpk];
       final next = PeerRecord(
@@ -163,12 +194,34 @@ class MeshSyncService extends ChangeNotifier {
   /// version. Network failure leaves the cache as-is — the next
   /// [pullAndApply] tick will reconcile (LWW from plan/24 § Q5).
   ///
-  /// [allowEmpty] opts out of the empty-on-existing safety net (see
-  /// [_publishOnce]). Used by the revoke-last-peer flow, which is the
-  /// only legitimate caller of "publish members=[] on top of a
-  /// non-zero version watermark" — every other caller leaves the
-  /// default `false` so the safety net still protects against races.
-  Future<MeshPublishResult> publish({bool allowEmpty = false}) async {
+  /// This is the additive/rename path (the [PairingStorage] mutation
+  /// hook). It cannot express "remove a member": the empty-on-existing
+  /// safety net below is not overridable from here, and any member the
+  /// user revoked is filtered out regardless of what the local snapshot
+  /// happens to contain. Removals go through [publishRevoke].
+  Future<MeshPublishResult> publish() => _publishGuarded(const <String>{});
+
+  /// Revoke [remoteEpk] and publish the membership that remains.
+  ///
+  /// Owns the local delete so a revoke cannot be half-performed: the
+  /// tombstone is recorded before anything can be fetched, which is
+  /// what makes the conflict retry safe (spec 06 T8). It is also the
+  /// only door to publishing `members: []` on top of a non-zero
+  /// version — that opt-out is *derived* from the tombstone instead of
+  /// being a parameter, so no other caller can ask for it by mistake.
+  ///
+  /// Idempotent: deleting a peer that is already gone is a no-op, so
+  /// the settings flow may (and does) delete locally first.
+  Future<MeshPublishResult> publishRevoke(String remoteEpk) async {
+    await _storage.deletePeerSilent(remoteEpk);
+    return _publishGuarded({toStandardB64(remoteEpk)});
+  }
+
+  Future<MeshPublishResult> _publishGuarded(Set<String> revoking) async {
+    // Record the tombstones BEFORE the in-flight check: a revoke that
+    // loses the "already in flight" race must still be un-resurrectable
+    // by the publish that is currently running, and by its refetch.
+    _revoked.addAll(revoking);
     if (_publishing) {
       return const MeshPublishFailure('already in flight');
     }
@@ -178,32 +231,43 @@ class MeshSyncService extends ChangeNotifier {
     }
     _publishing = true;
     try {
-      return await _publishOnce(
-        pk,
-        refetchOnConflict: true,
-        allowEmpty: allowEmpty,
-      );
+      return await _publishOnce(pk, refetchOnConflict: true);
     } finally {
       _publishing = false;
     }
   }
 
+  /// Derives the payload from CURRENT local storage every time it runs,
+  /// including the retry after a 409 — a captured member list would be
+  /// stale by exactly the mutation the conflict is telling us about.
+  /// What survives across the retry is not the list but the *intent*:
+  /// [_revoked] (see there) is what keeps the refetch in the middle from
+  /// handing the revoked member back to us.
   Future<MeshPublishResult> _publishOnce(
     Uint8List pk, {
     required bool refetchOnConflict,
-    required bool allowEmpty,
   }) async {
     final peers = await _storage.listPeers();
+    // A tombstone asserts that the local ABSENCE of an epk is
+    // authoritative. If it is present again, the user paired that
+    // machine again and the assertion is void — drop it, otherwise a
+    // re-pair in the same session could never be published. This is
+    // the only way a tombstoned epk can be back in storage:
+    // [_replaceLocalCacheWith] never writes one.
+    _revoked.removeAll(peers.map((p) => toStandardB64(p.remoteEpk)));
+    // What this publish asks the relay to forget. Captured here rather
+    // than read again after the response, so a revoke recorded
+    // mid-flight is not treated as ACKed by a POST it never rode in.
+    final revoking = Set.of(_revoked);
     // Safety net (plan/24-fix-app-publish-race): never overwrite a
-    // non-empty membership with members=[] UNLESS the caller opted in
-    // via [allowEmpty]. The only legitimate "empty on top of non-zero
-    // version" path is the user revoking their last paired peer
-    // (SettingsViewModel.revoke); every other caller passes
-    // `allowEmpty:false` so we still refuse races (transient
-    // PairingStorage state, apply mid-flight, mistaken Owner-key
-    // reset) that would self-revoke pi-extension on every Pi the user
-    // owns.
-    if (peers.isEmpty && _lastVersion > 0 && !allowEmpty) {
+    // non-empty membership with members=[] unless we are *deliberately*
+    // emptying it. "Deliberately" is not a caller-supplied flag any
+    // more — it is the presence of a revoke tombstone, which only
+    // [publishRevoke] can create. Everything else (mutation hook,
+    // conflict retry) still gets refused, so a transient PairingStorage
+    // state, an apply mid-flight or an Owner-key reset cannot
+    // self-revoke pi-extension on every Pi the user owns.
+    if (peers.isEmpty && _lastVersion > 0 && revoking.isEmpty) {
       return const MeshPublishFailure('refused empty-on-existing');
     }
     // Encoding gotcha: `PairingStorage.PeerRecord.remoteEpk` is whatever
@@ -220,6 +284,10 @@ class MeshSyncService extends ChangeNotifier {
               pairedAt: p.pairedAt,
               nickname: p.nickname,
             ))
+        // Belt to the tombstone's braces: even if a peer reappeared in
+        // storage between the check above and here, a revoked member is
+        // never serialised into a signed blob.
+        .where((m) => !revoking.contains(m.remoteEpk))
         .toList(growable: false);
     final nextVersion = _lastVersion + 1;
     final blob = MeshBlob(
@@ -236,16 +304,21 @@ class MeshSyncService extends ChangeNotifier {
       case MeshPublishOk(version: final v, updatedAt: final u):
         _lastVersion = v;
         lastUpdatedAt = u;
+        // The relay now holds a blob that excludes these members, so no
+        // future fetch can contradict the revoke — the tombstones have
+        // done their job and must not outlive it (a stale one would
+        // shadow a later re-pair until the next publish).
+        _revoked.removeAll(revoking);
         notifyListeners();
         return result;
       case MeshPublishConflict():
         if (!refetchOnConflict) return result;
+        // The refetch rewrites local storage with the relay's view.
+        // That is safe for a revoke only because [_revoked] is still
+        // set: the apply skips tombstoned members, so the re-read
+        // below cannot see the peer we just removed.
         await pullOnDemand();
-        return _publishOnce(
-          pk,
-          refetchOnConflict: false,
-          allowEmpty: allowEmpty,
-        );
+        return _publishOnce(pk, refetchOnConflict: false);
       case MeshPublishBadRequest():
         return result;
       case MeshPublishForbidden():
@@ -283,9 +356,14 @@ class MeshSyncService extends ChangeNotifier {
 
   /// Reset the version watermark — used by the Owner-key-replaced
   /// path (sync drift in plan/23) so the next fetch is unconditional.
+  ///
+  /// Drops the revoke tombstones with it: they name peers of the
+  /// *previous* Owner, whose pairings were just wiped wholesale. A new
+  /// identity starts with no membership and nothing to un-revoke.
   void resetVersionWatermark() {
     _lastVersion = 0;
     lastUpdatedAt = null;
+    _revoked.clear();
   }
 
   @override

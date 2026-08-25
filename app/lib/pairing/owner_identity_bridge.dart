@@ -45,8 +45,18 @@ class OwnerIdentityBridge extends ChangeNotifier {
   final PairingStorage _pairing;
   final Ed25519 _ed25519 = Ed25519();
 
+  /// Never assign this directly — go through [_adopt], the single place
+  /// allowed to change the Owner identity (see §10.8 of
+  /// `plan/62-specs/05-identity-keychain.md`).
   OwnerIdentity? _current;
+  /// In-flight [boot] work, shared by concurrent callers. `buildRouter`
+  /// kicks `_BootState.load` off without awaiting it, so a
+  /// /sync-required "Check again" tap can overlap it; without this,
+  /// both runs would generate + save their own keypair and the loser's
+  /// caller would hold a key the sync surface no longer stores.
+  Future<OwnerIdentityBootResult>? _booting;
   StreamSubscription<OwnerIdentity>? _watchSub;
+  Future<void> Function()? _onReset;
   bool _disposed = false;
 
   OwnerIdentityBridge(this._store, this._pairing);
@@ -59,7 +69,23 @@ class OwnerIdentityBridge extends ChangeNotifier {
   Uint8List? get currentOwnerPk => _current?.ownerPk;
 
   /// Load (or generate) the Owner identity.
-  /// Idempotent — repeated calls are cheap once `_current` is populated.
+  ///
+  /// Genuinely idempotent: once an identity is cached this is a pure
+  /// getter and never touches the platform again. That is a security
+  /// property, not an optimisation — the Owner key is the root of
+  /// trust, and every paired `remote_epk` in [PairingStorage] belongs
+  /// to whichever identity was live when the pairing happened. Before
+  /// the fix (spec 05 §10.8) the body re-read the store on every call,
+  /// so an item that changed underneath us — iCloud restoring a
+  /// different key while the user sits on /sync-required and taps
+  /// "Check again" (`sync_required_page.dart:27`), or a `load()` that
+  /// momentarily missed and made us generate a fresh keypair — swapped
+  /// `_current` while leaving the previous identity's peers in place.
+  /// A *change* of identity may only ever happen in [_adopt], which is
+  /// reached from the watch listener and wipes.
+  ///
+  /// [SyncUnavailableResult] is deliberately not cached: nothing was
+  /// adopted, so "Check again" must be able to re-read the platform.
   ///
   /// The `isSyncAvailable()` pre-flight is deliberately NOT a gate here
   /// (issue #39): on iOS it used to mirror the ubiquity token, which is
@@ -69,11 +95,19 @@ class OwnerIdentityBridge extends ChangeNotifier {
   /// throws [SyncUnavailable] when the platform sync surface genuinely
   /// can't hold the key (e.g. Android Block Store without backup), and
   /// only that verdict sends the router to /sync-required.
-  Future<OwnerIdentityBootResult> boot() async {
+  Future<OwnerIdentityBootResult> boot() {
+    final cached = _current;
+    if (cached != null) {
+      return Future.value(IdentityReady(cached, generated: false));
+    }
+    return _booting ??= _boot().whenComplete(() => _booting = null);
+  }
+
+  Future<OwnerIdentityBootResult> _boot() async {
     try {
       final loaded = await _store.load();
       if (loaded != null) {
-        _current = loaded;
+        await _adopt(loaded);
         return IdentityReady(loaded, generated: false);
       }
     } on SyncUnavailable {
@@ -84,11 +118,34 @@ class OwnerIdentityBridge extends ChangeNotifier {
 
     try {
       final generated = await _generateAndSave();
-      _current = generated;
+      await _adopt(generated);
       return IdentityReady(generated, generated: true);
     } on SyncUnavailable {
       return const SyncUnavailableResult();
     }
+  }
+
+  /// The ONLY writer of [_current]. Adopting a *different* `owner_pk` is
+  /// inseparable from the cleanup: the previous identity's peers, rooms
+  /// and host-level state go with it. Callers cannot opt out, so there
+  /// is no code path that can leave stale `remote_epk`s pointing at a
+  /// machine the new Owner never paired with.
+  ///
+  /// Three cases:
+  ///   - first adoption (`_current == null`): just cache. This is
+  ///     [boot]'s load/generate, and also the platform's initial watch
+  ///     emit when the router subscribed before boot finished — see
+  ///     [startWatching] for why that must not wipe.
+  ///   - same pk: refresh the cached blob, no wipe (echo of our own
+  ///     save, or a re-emit on foreground).
+  ///   - different pk: wipe peers + rooms, then let the host reset.
+  Future<void> _adopt(OwnerIdentity incoming) async {
+    final previous = _current;
+    _current = incoming;
+    if (previous == null) return;
+    if (_bytesEqual(previous.ownerPk, incoming.ownerPk)) return;
+    await _pairing.wipeAll();
+    await _onReset?.call();
   }
 
   Future<OwnerIdentity> _generateAndSave() async {
@@ -145,19 +202,12 @@ class OwnerIdentityBridge extends ChangeNotifier {
   /// bridge correct even when the order is reversed (e.g. router
   /// boot is fire-and-forget).
   void startWatching({required Future<void> Function() onReset}) {
+    _onReset = onReset;
     _watchSub?.cancel();
     _watchSub = _store.watch().listen((incoming) async {
-      final current = _current;
-      if (current == null) {
-        _current = incoming;
-        return;
-      }
-      if (_bytesEqual(current.ownerPk, incoming.ownerPk)) {
-        return;
-      }
-      _current = incoming;
-      await _pairing.wipeAll();
-      await onReset();
+      // Every branch (initial-emit adoption, same-pk echo, real swap)
+      // lives in [_adopt] — the single writer of `_current`.
+      await _adopt(incoming);
     }, onError: (Object e) {
     });
   }
@@ -168,6 +218,7 @@ class OwnerIdentityBridge extends ChangeNotifier {
     _disposed = true;
     _watchSub?.cancel();
     _watchSub = null;
+    _onReset = null;
     super.dispose();
   }
 }

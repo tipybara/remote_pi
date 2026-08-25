@@ -212,6 +212,25 @@ class ActionsRepository extends Repository implements IActionsRepository {
             ModelsCatalogue(models: models, current: current),
           );
         }
+      // Plan 62 spec 01 T5 — not every RPC failure comes back as
+      // `action_error`. `list_models` shapes its reply only AFTER the
+      // registry refresh succeeds, so a broken registry answers a plain
+      // `error` with `in_reply_to` set (handlers.ts `handleListModels`).
+      // Without this case the request sat in `_pending` until the 15s
+      // timer fired and the user was told "timeout" instead of the real
+      // cause.
+      case ErrorMessage(:final inReplyTo, :final code, :final message):
+        // An error with no correlation id is a broadcast notice (e.g.
+        // `unknown_peer`) owned by SessionRepository — never ours.
+        if (inReplyTo == null) return;
+        final p = _pending.remove(inReplyTo);
+        if (p == null) return;
+        p.timeout.cancel();
+        if (!p.completer.isCompleted) {
+          p.completer.completeError(
+            ActionFailure(message.isEmpty ? code : '$code: $message'),
+          );
+        }
       default:
         // All other ServerMessages are owned by SessionRepository.
         break;

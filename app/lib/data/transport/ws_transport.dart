@@ -105,9 +105,16 @@ class WsTransport implements PeerTransport, IControlLink {
             // into the active session. Without this exemption every reply from
             // the gateway would be dropped as a room mismatch, since the app's
             // active room is whichever chat the user has open.
+            //
+            // Plan 62 spec 03 T5 — so is the answer to an RPC we addressed at
+            // this room via `sendToRoom` (Home's rename targets a session the
+            // user is NOT chatting in). The exemption is per correlation id,
+            // not per room: exactly the one frame we are waiting for gets
+            // through, and the room's AgentChunks stay out.
             if (senderRoom != null &&
                 senderRoom != transport._activeRoom &&
-                senderRoom != kControlRoomId) {
+                senderRoom != kControlRoomId &&
+                !transport._claimsAwaitedReply(bytes, senderRoom)) {
               debugPrint(
                 '[ws-in] bytes=${rawStr.length} kind=envelope '
                 'sender_room=$senderRoom DROPPED (room-mismatch)',
@@ -227,11 +234,43 @@ class WsTransport implements PeerTransport, IControlLink {
   /// conversation to another cwd — precisely the class of jump plan 61 exists
   /// to stop. This leaves `_activeRoom` alone.
   Future<void> sendToRoom(Uint8List data, String room) async {
+    _rememberAwaitedReply(data, room);
     _ws.sink.add(jsonEncode({
       'peer': _peerPubkey,
       'room': room,
       'ct': base64.encode(data),
     }));
+  }
+
+  // ---- Room-addressed RPC correlation (plan 62 spec 03 T5) ----------------
+
+  /// Outbound request id → the room it was addressed at, plus when. An entry
+  /// buys exactly ONE inbound frame past the room demux; see the listener.
+  final Map<String, _AwaitedReply> _awaitedReplies = {};
+
+  /// Comfortably longer than the 15 s `ActionsRepository` RPC timeout, so a
+  /// reply that never comes is evicted rather than pinning the map open.
+  static const Duration _awaitedReplyTtl = Duration(minutes: 1);
+
+  void _rememberAwaitedReply(Uint8List data, String room) {
+    final id = _jsonStringField(data, 'id');
+    if (id == null) return;
+    final cutoff = DateTime.now().subtract(_awaitedReplyTtl);
+    _awaitedReplies.removeWhere((_, v) => v.sentAt.isBefore(cutoff));
+    _awaitedReplies[id] = _AwaitedReply(room: room, sentAt: DateTime.now());
+  }
+
+  /// True when [payload] is the answer to an RPC this transport addressed at
+  /// [senderRoom]. Consumes the correlation id — a reply arrives once, so a
+  /// later frame reusing the id cannot ride the same exemption.
+  bool _claimsAwaitedReply(Uint8List payload, String senderRoom) {
+    if (_awaitedReplies.isEmpty) return false;
+    final inReplyTo = _jsonStringField(payload, 'in_reply_to');
+    if (inReplyTo == null) return false;
+    final awaited = _awaitedReplies[inReplyTo];
+    if (awaited == null || awaited.room != senderRoom) return false;
+    _awaitedReplies.remove(inReplyTo);
+    return true;
   }
 
   @override
@@ -259,6 +298,27 @@ class WsTransport implements PeerTransport, IControlLink {
 }
 
 // ---------------------------------------------------------------------------
+
+class _AwaitedReply {
+  final String room;
+  final DateTime sentAt;
+  const _AwaitedReply({required this.room, required this.sentAt});
+}
+
+// Reads one top-level string field out of a plain-JSON inner payload.
+// The transport is otherwise opaque to message content; this peek exists
+// only to correlate a room-addressed RPC with its reply (spec 03 T5).
+// Returns null for anything that isn't a JSON object with that string key.
+String? _jsonStringField(List<int> bytes, String key) {
+  try {
+    final decoded = jsonDecode(utf8.decode(bytes));
+    if (decoded is! Map<String, dynamic>) return null;
+    final value = decoded[key];
+    return value is String ? value : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 class _MsgQueue {
   final _buf = <Uint8List>[];

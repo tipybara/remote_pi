@@ -734,23 +734,53 @@ class SyncService extends Service {
     final room = _activeRoomId;
     final rows = _convertHistory(h.events);
     final historyIds = {for (final r in rows) _key(r.role, r.id)};
+    // Plan 62 spec 07 T1 — the incoming window is not necessarily the whole
+    // conversation.
+    //
+    // `session_history` carries `truncated: true` when the Pi could only send
+    // the last N events (`REMOTE_PI_SYNC_LIMIT`, default 30). This code used to
+    // ignore that flag and reconcile the box to the window verbatim, so a
+    // 500-message session was cut to its last 30 rows on EVERY reconnect — and
+    // the relay re-delivers `session_history` on every reconnect. The user
+    // silently lost readable history they had already received, permanently,
+    // for no reason other than the socket dropping.
+    //
+    // When the window is truncated, local rows OLDER than it are still the
+    // best record anyone has, so they are kept. When it is not truncated the
+    // Pi sent everything and a wholesale replace remains correct — that is what
+    // makes an explicit `session_new` (which clears the buffer Pi-side and
+    // answers with an untruncated, empty history) still wipe the box.
+    final oldest = rows.isEmpty ? null : rows.first.ts;
     await _enqueue(() async {
       final box = await _boxes.msgsBox(epk, room);
+      // Rows that predate the window and are not restated by it.
+      final retained = <MessageRecord>[];
       // Preserve local pending user rows the Pi hasn't echoed yet.
       final preserved = <MessageRecord>[];
       for (final v in box.values) {
         final r = MessageRecord.fromJson(_coerce(v));
-        if (r.role == MsgRole.user &&
-            r.pending &&
-            !historyIds.contains(_key(r.role, r.id))) {
+        final restated = historyIds.contains(_key(r.role, r.id));
+        if (r.role == MsgRole.user && r.pending && !restated) {
           preserved.add(r);
+          continue;
+        }
+        if (h.truncated && !restated && oldest != null && r.ts.isBefore(oldest)) {
+          retained.add(r);
         }
       }
-      // Desired ordered state: history (seq = index) then preserved pending.
+      // Keep the pre-window tail in its original order. `seq` is a positional
+      // index that is about to be reassigned, so order by it — it is what the
+      // rows were written under and it is stable, unlike `ts` for rows that
+      // share a millisecond.
+      retained.sort((a, b) => a.seq.compareTo(b.seq));
+      // Desired ordered state: retained history, then the window, then any
+      // local pending rows.
       final desired = <MessageRecord>[
-        for (var i = 0; i < rows.length; i++) rows[i].copyWith(seq: i),
+        for (var i = 0; i < retained.length; i++) retained[i].copyWith(seq: i),
+        for (var i = 0; i < rows.length; i++)
+          rows[i].copyWith(seq: retained.length + i),
         for (var j = 0; j < preserved.length; j++)
-          preserved[j].copyWith(seq: rows.length + j),
+          preserved[j].copyWith(seq: retained.length + rows.length + j),
       ];
       // Reconcile the box to `desired` with the MINIMUM number of writes.
       //

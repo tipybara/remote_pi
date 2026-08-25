@@ -96,6 +96,42 @@ class _FalsePreflightStore implements OwnerIdentityStore {
   Stream<OwnerIdentity> watch() => _inner.watch();
 }
 
+/// Store whose `load()` answers a scripted sequence, so a test can make
+/// the underlying sync item *change between two boot() calls* — the
+/// shape of "iCloud pushed a restored key while the user sat on
+/// /sync-required and tapped Check again" (spec 05 §10.8) — and count
+/// how many times the bridge actually hit the platform.
+class _ScriptedLoadStore implements OwnerIdentityStore {
+  final List<OwnerIdentity?> _loads;
+  final List<OwnerIdentity> saved = [];
+  int loadCalls = 0;
+  final _controller = StreamController<OwnerIdentity>.broadcast();
+
+  _ScriptedLoadStore(this._loads);
+
+  @override
+  Future<bool> isSyncAvailable() async => true;
+  @override
+  Future<OwnerIdentity?> load() async {
+    final value = _loads[loadCalls < _loads.length ? loadCalls : _loads.length - 1];
+    loadCalls++;
+    // Yield so two concurrent boot() calls can interleave here.
+    await Future<void>.delayed(Duration.zero);
+    return value;
+  }
+
+  @override
+  Future<void> save(OwnerIdentity identity) async {
+    saved.add(identity);
+    _controller.add(identity);
+  }
+
+  @override
+  Future<void> delete() async {}
+  @override
+  Stream<OwnerIdentity> watch() => _controller.stream;
+}
+
 void main() {
   group('OwnerIdentityBridge.boot — issue #39 (pre-flight must not gate)', () {
     test('boot succeeds when pre-flight is false but load/save work', () async {
@@ -217,6 +253,32 @@ void main() {
           reason: 'real key rotation must wipe');
     });
 
+    test('the wiping path also refreshes what boot() reports afterwards',
+        () async {
+      // The single-path invariant seen from the other side: once the
+      // watch listener has swapped the Owner, a later boot() must
+      // report the NEW identity — otherwise "boot() caches" would
+      // pin the app to a key the sync surface no longer holds.
+      final first = await _freshIdentity();
+      final second = await _freshIdentity();
+      final store = InMemoryOwnerIdentityStore(initial: first);
+      final storage = PairingStorage(_FakeSecureStorage());
+      final bridge = OwnerIdentityBridge(store, storage);
+      await bridge.boot();
+      expect(bridge.currentOwnerPk, first.ownerPk);
+
+      final resetCompleter = Completer<void>();
+      bridge.startWatching(onReset: () async {
+        if (!resetCompleter.isCompleted) resetCompleter.complete();
+      });
+      await store.save(second);
+      await resetCompleter.future.timeout(const Duration(seconds: 1));
+
+      final result = await bridge.boot();
+      expect((result as IdentityReady).identity.ownerPk, second.ownerPk);
+      expect(bridge.currentOwnerPk, second.ownerPk);
+    });
+
     test('same-pk re-emit after adoption is a noop (no wipe, no reset)',
         () async {
       final id = await _freshIdentity();
@@ -239,6 +301,105 @@ void main() {
 
       expect(await storage.listPeers(), hasLength(1));
       expect(resets, 0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // plan/62-specs/05-identity-keychain.md §10.8 — boot() is documented
+  // idempotent and must actually be. The Owner key is the root of trust:
+  // the ONLY path allowed to swap it is the watch listener, because that
+  // is where peers/rooms are wiped. A boot() that re-reads the platform
+  // item can otherwise replace `_current` behind a peer set that was
+  // paired against the previous identity.
+  // -------------------------------------------------------------------------
+
+  group('OwnerIdentityBridge.boot — idempotence (spec 05 §10.8)', () {
+    test(
+        'an item that changed between calls cannot swap the Owner behind '
+        'the peer set', () async {
+      final first = await _freshIdentity();
+      final second = await _freshIdentity();
+      final store = _ScriptedLoadStore([first, second]);
+      final storage = PairingStorage(_FakeSecureStorage());
+      final bridge = OwnerIdentityBridge(store, storage);
+
+      await bridge.boot();
+      // Paired against `first` — these handles only mean anything to it.
+      await storage.savePeer(const PeerRecord(
+        remoteEpk: 'epk-of-first',
+        sessionName: 'pi',
+        relayUrl: 'https://r',
+        pairedAt: '2026-05-15T10:30:00Z',
+      ));
+
+      // /sync-required's "Check again" (sync_required_page.dart:27) and
+      // the router's re-`load()` both call boot() a second time.
+      final result = await bridge.boot();
+
+      expect(bridge.currentOwnerPk, first.ownerPk,
+          reason: 'boot() must be a cache read — the identity may only '
+              'change through the watch path, which wipes');
+      expect((result as IdentityReady).identity.ownerPk, first.ownerPk);
+      expect(store.loadCalls, 1, reason: 'no second platform read');
+      final peers = await storage.listPeers();
+      expect(peers.map((p) => p.remoteEpk), ['epk-of-first'],
+          reason: 'peers must never outlive the identity they were '
+              'paired against');
+    });
+
+    test('a load() that momentarily misses cannot rotate the Owner key',
+        () async {
+      // Worst shape of the same defect: the second boot() sees `null`
+      // (keychain hiccup / item not yet re-synced) and the old body
+      // generated AND SAVED a brand-new keypair — silently rotating the
+      // root of trust for every device on the account.
+      final first = await _freshIdentity();
+      final store = _ScriptedLoadStore([first, null]);
+      final storage = PairingStorage(_FakeSecureStorage());
+      final bridge = OwnerIdentityBridge(store, storage);
+
+      await bridge.boot();
+      final result = await bridge.boot();
+
+      expect(store.saved, isEmpty,
+          reason: 'a cached identity must never be overwritten on disk');
+      expect(bridge.currentOwnerPk, first.ownerPk);
+      expect((result as IdentityReady).generated, isFalse);
+    });
+
+    test('concurrent boot() calls generate exactly one identity', () async {
+      // buildRouter fires `_BootState.load` (→ boot()) without awaiting
+      // it, so a "Check again" tap can overlap it. Two generate+save
+      // races leave the caller of the first boot holding a key the sync
+      // surface no longer stores.
+      final store = _ScriptedLoadStore([null]);
+      final storage = PairingStorage(_FakeSecureStorage());
+      final bridge = OwnerIdentityBridge(store, storage);
+
+      final results = await Future.wait([bridge.boot(), bridge.boot()]);
+
+      expect(store.saved, hasLength(1),
+          reason: 'only one identity may ever be generated');
+      final pks = results
+          .map((r) => (r as IdentityReady).identity.ownerPk)
+          .toList();
+      expect(pks[0], pks[1]);
+      expect(bridge.currentOwnerPk, pks[0]);
+    });
+
+    test('SyncUnavailable is NOT cached — Check again re-reads the platform',
+        () async {
+      final store = InMemoryOwnerIdentityStore(syncAvailable: false);
+      final storage = PairingStorage(_FakeSecureStorage());
+      final bridge = OwnerIdentityBridge(store, storage);
+
+      expect(await bridge.boot(), isA<SyncUnavailableResult>());
+      // User flips iCloud Keychain on and taps "Check again".
+      store.syncAvailable = true;
+      final result = await bridge.boot();
+
+      expect(result, isA<IdentityReady>());
+      expect(bridge.currentOwnerPk, isNotNull);
     });
   });
 }

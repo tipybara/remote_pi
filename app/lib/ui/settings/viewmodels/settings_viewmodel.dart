@@ -15,11 +15,11 @@ class SettingsViewModel extends ViewModel<SettingsState> {
   final Preferences _prefs;
   final ConnectionManager _conn;
 
-  /// Optional in tests; required in production. The revoke flow drives
-  /// it explicitly with `allowEmpty:true` so a revoke of the last
-  /// remaining peer still propagates to the relay — without it, the
-  /// safety net in [MeshSyncService] refuses to publish members=[] and
-  /// the next `pullOnDemand` resurrects the peer from the stale blob.
+  /// Optional in tests; required in production. The revoke flow goes
+  /// through [MeshSyncService.publishRevoke] so a revoke of the last
+  /// remaining peer still propagates to the relay — a plain publish
+  /// hits the safety net that refuses members=[], and the next
+  /// `pullOnDemand` would resurrect the peer from the stale blob.
   final MeshSyncService? _meshSync;
   bool _disposed = false;
 
@@ -100,14 +100,16 @@ class SettingsViewModel extends ViewModel<SettingsState> {
     // Use the SILENT delete so the storage mutation hook does not
     // auto-publish a members=[] blob through the safety-net guard
     // (which would refuse it for the last-peer case and leave the
-    // relay holding stale state). We publish ourselves below with
-    // `allowEmpty:true` — the only place in the app that opts out of
-    // the empty-on-existing safety net.
+    // relay holding stale state). The rest of this method needs the
+    // peer gone before it reads `remaining`, so the delete happens
+    // here; [MeshSyncService.publishRevoke] repeats it idempotently
+    // and — the part that matters — records the revoke so a 409 retry
+    // cannot fetch the peer back and re-publish it.
     await _storage.deletePeerSilent(epk);
     final remaining = await _storage.listPeers();
     if (_meshSync != null) {
       // ignore: unawaited_futures
-      _meshSync.publish(allowEmpty: remaining.isEmpty);
+      _meshSync.publishRevoke(epk);
     }
     _conn.subscribeToPeers(remaining.map((p) => p.remoteEpk).toList());
     // If the revoked peer was the one currently driving the connection,

@@ -66,6 +66,11 @@ class FakeRelay extends EventEmitter {
       return JSON.parse(Buffer.from(outer.ct, "base64").toString("utf8")) as Record<string, unknown>;
     });
   }
+
+  /** The OUTER envelopes, so a test can assert routing and not just payload. */
+  outbound(): Array<Record<string, unknown>> {
+    return this.sent.map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
 }
 
 // ── host stub ───────────────────────────────────────────────────────────────
@@ -145,6 +150,33 @@ describe("Gateway — plan 61 Phase 3", () => {
 
     await gw.stop();
     expect(relay.closed).toBe(true);
+  });
+
+  // Regression: the reply used to be addressed at `(app, "ctrl")`, which is not
+  // a registry key — the app registers at `main`. The relay dropped every
+  // control reply and answered the gateway with `transport_error: offline`,
+  // which it discarded, so every control RPC timed out at 45s against a machine
+  // that looked online. Found by capturing real bytes off a live relay
+  // (app-ios/Tests/Fixtures), NOT by this suite: the old assertions decoded the
+  // inner payload and never looked at the outer envelope.
+  test("a reply is addressed at the DESTINATION's room, not the gateway's", async () => {
+    const ws = registerWorkspace();
+    const h = makeHost();
+    const gw = await startGateway(h);
+
+    relay.deliver(OWNER, { type: "workspace_list", id: "r1" });
+    await vi.waitFor(() => expect(relay.replies()).toHaveLength(1));
+
+    const outer = relay.outbound()[0]!;
+    expect(outer["peer"]).toBe(OWNER);
+    // Omitted entirely: the relay defaults an absent `room` to `main`, which is
+    // where the app is. Naming ANY room here is wrong — ours is not the
+    // destination, and the app's is not ours to know.
+    expect(outer["room"]).toBeUndefined();
+    expect(outer["room"]).not.toBe(CONTROL_ROOM_ID);
+    void ws;
+
+    await gw.stop();
   });
 
   test("a frame from a NON-Owner peer is dropped, with no reply at all", async () => {

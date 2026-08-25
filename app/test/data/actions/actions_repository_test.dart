@@ -206,6 +206,68 @@ void main() {
       s.cm.dispose();
     });
 
+    // Plan 62 spec 01 T5 — `list_models` does NOT fail with `action_error`.
+    // `handleListModels` wraps the registry refresh in a try and answers a
+    // plain `error` carrying `in_reply_to`
+    // (pi-extension/src/actions/handlers.ts:299-306). Correlating only
+    // `action_ok`/`action_error`/`models_list` left the RPC pending until
+    // the timer fired, so a broken registry surfaced as "timeout" and the
+    // real cause never reached the user.
+    test('listModels() surfaces a plain `error` reply, not a timeout', () async {
+      final s = await _setup(timeout: const Duration(milliseconds: 200));
+      final future = s.repo.listModels();
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+      final sent = s.ch.sent.single as ListModels;
+      s.ch.push(
+        ErrorMessage(
+          inReplyTo: sent.id,
+          code: 'internal_error',
+          message: 'model registry unavailable (no active Pi session context)',
+        ),
+      );
+      await expectLater(
+        future,
+        throwsA(
+          isA<ActionFailure>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('internal_error'),
+              contains('model registry unavailable'),
+            ),
+          ),
+        ),
+      );
+      s.cm.dispose();
+    });
+
+    test('an uncorrelated `error` leaves pending actions alone', () async {
+      final s = await _setup(timeout: const Duration(milliseconds: 200));
+      final future = s.repo.compact();
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+      final sent = s.ch.sent.single as SessionCompact;
+      // Broadcast notices (no `in_reply_to`) and replies to ids we never
+      // sent are owned by SessionRepository — they must not resolve ours.
+      s.ch.push(ErrorMessage(code: 'unknown_peer', message: 'gone'));
+      s.ch.push(
+        ErrorMessage(
+          inReplyTo: 'never-sent',
+          code: 'internal_error',
+          message: 'boom',
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      s.ch.push(
+        ActionOk(
+          inReplyTo: sent.id,
+          action: ActionName.sessionCompact,
+          rawAction: 'session_compact',
+        ),
+      );
+      await future; // still resolves normally
+      s.cm.dispose();
+    });
+
     test(
       'listModels() caches by session and short-circuits second call',
       () async {

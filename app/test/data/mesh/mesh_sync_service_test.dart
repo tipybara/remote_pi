@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:app/data/mesh/mesh_blob.dart';
 import 'package:app/data/mesh/mesh_client.dart';
 import 'package:app/data/mesh/mesh_sync_service.dart';
+import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/pairing/owner_identity_bridge.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:cryptography/cryptography.dart';
@@ -472,10 +473,12 @@ void main() {
     });
 
     test(
-      'publish(allowEmpty: true) bypasses the empty-on-existing safety '
-      'net — drives the legitimate "revoke last peer" flow so the '
-      'relay forgets the lone member instead of holding stale state '
-      'that the next pullOnDemand would resurrect locally',
+      'publishRevoke bypasses the empty-on-existing safety net — the '
+      'legitimate "revoke last peer" flow, so the relay forgets the lone '
+      'member instead of holding stale state that the next pullOnDemand '
+      'would resurrect locally. Plain publish() has no way to ask for '
+      'this: the opt-out is derived from a revoke tombstone, not a '
+      'caller-supplied flag',
       () async {
         final owner = await _newOwner();
         final storage = PairingStorage(_FakeSecureStorage());
@@ -501,18 +504,19 @@ void main() {
         expect(first, isA<MeshPublishOk>());
         expect(svc.lastVersion, 1);
 
-        // The legitimate last-peer revoke: storage is empty AND watermark
-        // is non-zero, but the caller explicitly opted in.
-        await storage.deletePeerSilent('epk-only');
+        // The legitimate last-peer revoke: storage ends up empty AND the
+        // watermark is non-zero, but the emptiness is explained by a
+        // revoke the service itself recorded.
         s.adapter.on(
           'POST',
           '/mesh/$hash',
           _Reply(200, jsonEncode({'version': 2, 'updated_at': 2})),
         );
-        final result = await svc.publish(allowEmpty: true);
+        final result = await svc.publishRevoke('epk-only');
         expect(result, isA<MeshPublishOk>(),
-            reason: 'allowEmpty:true must bypass the safety net');
+            reason: 'a recorded revoke must bypass the safety net');
         expect(svc.lastVersion, 2);
+        expect(await storage.listPeers(), isEmpty);
       },
     );
 
@@ -638,6 +642,245 @@ void main() {
       expect(s.adapter.postCount, greaterThanOrEqualTo(1));
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // plan/62-specs/06-mesh-membership.md T8 — the 409 retry re-reads local
+  // storage, and the refetch it does first *re-applies the relay's blob to
+  // that storage*. For a revoke that lost the version race, the relay's
+  // blob still lists the peer the user just removed: the apply writes it
+  // back locally and the retry publishes it back to the relay. A revoke
+  // that silently un-revokes is a security failure, not a sync annoyance.
+  // ---------------------------------------------------------------------------
+
+  group('MeshSyncService.publishRevoke — revoke survives the 409 retry', () {
+    /// Relay holds v5 listing [members]; POST #1 conflicts, POST #2 wins
+    /// as v6. Returns the scripted adapter so the test can read bodies.
+    Future<({MeshSyncService svc, _SequencingAdapter adapter})> raceSetup({
+      required PairingStorage storage,
+      required ({SimpleKeyPair keyPair, Uint8List ownerPk}) owner,
+      required List<MeshMember> remoteMembers,
+    }) async {
+      final bridge = await _bootedBridge(storage, owner.keyPair, owner.ownerPk);
+      final hash = await MeshClient.ownerPkHash(owner.ownerPk);
+      final remote = MeshBlob(
+        version: 5,
+        issuedAt: 1,
+        ownerPk: owner.ownerPk,
+        members: remoteMembers,
+      );
+      final env = await remote.signWith(owner.keyPair);
+      final adapter = _SequencingAdapter(
+        postPath: '/mesh/$hash',
+        postSequence: [
+          const _Reply(409, ''),
+          _Reply(200, jsonEncode({'version': 6, 'updated_at': 2})),
+        ],
+        others: {
+          'GET /mesh/$hash': _Reply(200, jsonEncode({
+            'blob': base64.encode(env.blob),
+            'sig': base64.encode(env.sig),
+            'version': 5,
+            'updated_at': 1,
+          })),
+        },
+      );
+      final client = MeshClient(
+        baseUrlProvider: () => 'https://r',
+        dio: Dio(BaseOptions(
+          validateStatus: (_) => true,
+          responseType: ResponseType.plain,
+        ))
+          ..httpClientAdapter = adapter,
+      );
+      return (svc: MeshSyncService(client, bridge, storage), adapter: adapter);
+    }
+
+    List<String> membersOf(String body) {
+      final blob = MeshBlob.fromCanonicalBytes(
+        base64.decode((jsonDecode(body) as Map<String, Object?>)['blob']! as String),
+      );
+      return blob.members.map((m) => m.remoteEpk).toList();
+    }
+
+    test('the retry does not resurrect the revoked peer', () async {
+      final owner = await _newOwner();
+      final storage = PairingStorage(_FakeSecureStorage());
+      await storage.savePeerSilent(const PeerRecord(
+        remoteEpk: 'epk-keep',
+        sessionName: 'keep',
+        relayUrl: 'wss://r',
+        pairedAt: '2026-05-01T00:00:00Z',
+      ));
+      await storage.savePeerSilent(const PeerRecord(
+        remoteEpk: 'epk-revoked',
+        sessionName: 'revoked',
+        relayUrl: 'wss://r',
+        pairedAt: '2026-05-02T00:00:00Z',
+      ));
+      // Another device published v5 while the user was revoking — it
+      // still lists BOTH machines.
+      final setup = await raceSetup(
+        storage: storage,
+        owner: owner,
+        remoteMembers: const [
+          MeshMember(
+            remoteEpk: 'epk-keep',
+            relayUrl: 'wss://r',
+            pairedAt: '2026-05-01T00:00:00Z',
+          ),
+          MeshMember(
+            remoteEpk: 'epk-revoked',
+            relayUrl: 'wss://r',
+            pairedAt: '2026-05-02T00:00:00Z',
+          ),
+        ],
+      );
+
+      final r = await setup.svc.publishRevoke('epk-revoked');
+
+      expect(r, isA<MeshPublishOk>());
+      expect(setup.adapter.postBodies, hasLength(2), reason: 'one retry');
+      // Published epks are normalised to standard base64 (T1), storage
+      // keys are not — compare each in its own alphabet.
+      expect(membersOf(setup.adapter.postBodies.last),
+          [toStandardB64('epk-keep')],
+          reason: 'the retry must publish the revoke, not undo it');
+      expect((await storage.listPeers()).map((p) => p.remoteEpk), ['epk-keep'],
+          reason: 'the conflict refetch must not write the revoked peer '
+              'back into local storage');
+    });
+
+    test('revoking the LAST peer survives the retry', () async {
+      final owner = await _newOwner();
+      final storage = PairingStorage(_FakeSecureStorage());
+      await storage.savePeerSilent(const PeerRecord(
+        remoteEpk: 'epk-only',
+        sessionName: 'only',
+        relayUrl: 'wss://r',
+        pairedAt: '2026-05-01T00:00:00Z',
+      ));
+      final setup = await raceSetup(
+        storage: storage,
+        owner: owner,
+        remoteMembers: const [
+          MeshMember(
+            remoteEpk: 'epk-only',
+            relayUrl: 'wss://r',
+            pairedAt: '2026-05-01T00:00:00Z',
+          ),
+        ],
+      );
+
+      final r = await setup.svc.publishRevoke('epk-only');
+
+      expect(r, isA<MeshPublishOk>());
+      expect(membersOf(setup.adapter.postBodies.last), isEmpty,
+          reason: 'the empty-on-existing net must not swallow a real '
+              'revoke that had to be retried');
+      expect(await storage.listPeers(), isEmpty);
+    });
+
+    test('a revoke the relay never ACKed is not undone by the next poll',
+        () async {
+      // Same tombstone, different entry point: the revoke publish
+      // failed (offline / relay 5xx), so the relay still lists the peer
+      // — and the 60s poll would otherwise apply that list straight
+      // back over the user's decision.
+      final owner = await _newOwner();
+      final storage = PairingStorage(_FakeSecureStorage());
+      await storage.savePeerSilent(const PeerRecord(
+        remoteEpk: 'epk-keep',
+        sessionName: 'keep',
+        relayUrl: 'wss://r',
+        pairedAt: '2026-05-01T00:00:00Z',
+      ));
+      await storage.savePeerSilent(const PeerRecord(
+        remoteEpk: 'epk-revoked',
+        sessionName: 'revoked',
+        relayUrl: 'wss://r',
+        pairedAt: '2026-05-02T00:00:00Z',
+      ));
+      final bridge = await _bootedBridge(storage, owner.keyPair, owner.ownerPk);
+      final hash = await MeshClient.ownerPkHash(owner.ownerPk);
+      final remote = MeshBlob(
+        version: 5,
+        issuedAt: 1,
+        ownerPk: owner.ownerPk,
+        members: const [
+          MeshMember(
+            remoteEpk: 'epk-keep',
+            relayUrl: 'wss://r',
+            pairedAt: '2026-05-01T00:00:00Z',
+          ),
+          MeshMember(
+            remoteEpk: 'epk-revoked',
+            relayUrl: 'wss://r',
+            pairedAt: '2026-05-02T00:00:00Z',
+          ),
+        ],
+      );
+      final env = await remote.signWith(owner.keyPair);
+      final s = _stubDio();
+      s.adapter.on('POST', '/mesh/$hash', const _Reply(500, ''));
+      s.adapter.on('GET', '/mesh/$hash', _Reply(200, jsonEncode({
+        'blob': base64.encode(env.blob),
+        'sig': base64.encode(env.sig),
+        'version': 5,
+        'updated_at': 1,
+      })));
+      final client = MeshClient(baseUrlProvider: () => 'https://r', dio: s.dio);
+      final svc = MeshSyncService(client, bridge, storage);
+
+      expect(await svc.publishRevoke('epk-revoked'), isA<MeshPublishFailure>());
+      await svc.pullOnDemand();
+
+      expect((await storage.listPeers()).map((p) => p.remoteEpk), ['epk-keep'],
+          reason: 'an unconfirmed revoke still outranks the relay blob it '
+              'has not reached yet');
+    });
+
+    test('re-pairing a revoked machine clears its tombstone', () async {
+      final owner = await _newOwner();
+      final storage = PairingStorage(_FakeSecureStorage());
+      await storage.savePeerSilent(const PeerRecord(
+        remoteEpk: 'epk-again',
+        sessionName: 'again',
+        relayUrl: 'wss://r',
+        pairedAt: '2026-05-01T00:00:00Z',
+      ));
+      final hash = await MeshClient.ownerPkHash(owner.ownerPk);
+      final bridge = await _bootedBridge(storage, owner.keyPair, owner.ownerPk);
+      final s = _stubDio();
+      s.adapter.on('POST', '/mesh/$hash',
+          _Reply(200, jsonEncode({'version': 1, 'updated_at': 1})));
+      final client = MeshClient(baseUrlProvider: () => 'https://r', dio: s.dio);
+      final svc = MeshSyncService(client, bridge, storage);
+
+      await svc.publishRevoke('epk-again');
+      expect(await storage.listPeers(), isEmpty);
+
+      // User re-scans the QR of the same machine.
+      await storage.savePeerSilent(const PeerRecord(
+        remoteEpk: 'epk-again',
+        sessionName: 'again',
+        relayUrl: 'wss://r',
+        pairedAt: '2026-06-01T00:00:00Z',
+      ));
+      s.adapter.on('POST', '/mesh/$hash',
+          _Reply(200, jsonEncode({'version': 2, 'updated_at': 2})));
+      final r = await svc.publish();
+
+      expect(r, isA<MeshPublishOk>());
+      final blob = MeshBlob.fromCanonicalBytes(
+        base64.decode(
+          (jsonDecode(s.adapter.lastBody!) as Map<String, Object?>)['blob']!
+              as String,
+        ),
+      );
+      expect(blob.members.map((m) => m.remoteEpk), [toStandardB64('epk-again')],
+          reason: 'a live local pairing outranks a stale tombstone');
+    });
+  });
 }
 
 /// HttpClientAdapter that returns POSTs in declared sequence, GETs by
@@ -647,6 +890,9 @@ class _SequencingAdapter implements HttpClientAdapter {
   final List<_Reply> postSequence;
   final Map<String, _Reply> others;
   int postCalls = 0;
+  /// Body of every POST, in order — lets a test read the blob the retry
+  /// actually shipped.
+  final List<String> postBodies = [];
   _SequencingAdapter({
     required this.postPath,
     required this.postSequence,
@@ -656,10 +902,11 @@ class _SequencingAdapter implements HttpClientAdapter {
   @override
   Future<ResponseBody> fetch(RequestOptions options, Stream<Uint8List>? stream, Future<void>? cancel) async {
     if (stream != null) {
-      await stream.fold<List<int>>(<int>[], (acc, chunk) {
+      final bytes = await stream.fold<List<int>>(<int>[], (acc, chunk) {
         acc.addAll(chunk);
         return acc;
       });
+      if (options.method == 'POST') postBodies.add(utf8.decode(bytes));
     }
     _Reply reply;
     if (options.method == 'POST' && options.uri.path == postPath) {

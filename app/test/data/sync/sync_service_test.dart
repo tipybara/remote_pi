@@ -822,6 +822,125 @@ void main() {
     },
   );
 
+  // Plan 62 spec 07 T1 — a truncated history window must not eat local history.
+  //
+  // `session_history` carries `truncated: true` when the Pi could only send the
+  // last N events. The old code ignored the flag and reconciled the box to the
+  // window verbatim, so a long conversation was cut to its last N rows on every
+  // reconnect — and the relay re-delivers history on every reconnect.
+  group('truncated session_history preserves older local rows', () {
+    /// Seed a box with a conversation the app already received in full.
+    Future<void> seedFullHistory(
+      ({ConnectionManager conn, _FakeChannel ch, SyncService sync, String epk}) s,
+    ) async {
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'seed',
+          sessionStartedAt: 0,
+          events: const [
+            UserInputEvt(ts: 1, id: 'u1', text: 'one'),
+            AgentMessageEvt(ts: 2, inReplyTo: 'a1', text: 'ONE'),
+            UserInputEvt(ts: 3, id: 'u2', text: 'two'),
+            AgentMessageEvt(ts: 4, inReplyTo: 'a2', text: 'TWO'),
+            UserInputEvt(ts: 5, id: 'u3', text: 'three'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+    }
+
+    test('a truncated window keeps the rows that predate it', () async {
+      final s = await setup();
+      await seedFullHistory(s);
+      expect(messages(s.epk), hasLength(5), reason: 'seeded full history');
+
+      // Reconnect: the Pi can only send the tail.
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'resync',
+          sessionStartedAt: 0,
+          events: const [
+            UserInputEvt(ts: 5, id: 'u3', text: 'three'),
+            AgentMessageEvt(ts: 6, inReplyTo: 'a3', text: 'THREE'),
+          ],
+          eos: true,
+          truncated: true,
+        ),
+      );
+      await _settle();
+
+      final texts = messages(s.epk).map((m) => m.text).toList();
+      expect(
+        texts,
+        ['one', 'ONE', 'two', 'TWO', 'three', 'THREE'],
+        reason: 'pre-window rows survive, in order, and the window is appended',
+      );
+    });
+
+    test('a row restated by the window is not duplicated', () async {
+      final s = await setup();
+      await seedFullHistory(s);
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'resync',
+          sessionStartedAt: 0,
+          // u3 is BOTH in the local box and in the window.
+          events: const [UserInputEvt(ts: 5, id: 'u3', text: 'three')],
+          eos: true,
+          truncated: true,
+        ),
+      );
+      await _settle();
+
+      final texts = messages(s.epk).map((m) => m.text).toList();
+      expect(texts.where((t) => t == 'three').length, 1);
+      expect(texts, ['one', 'ONE', 'two', 'TWO', 'three']);
+    });
+
+    test(
+      'an UNtruncated window still replaces wholesale — this is what makes '
+      'session_new actually clear the box',
+      () async {
+        final s = await setup();
+        await seedFullHistory(s);
+
+        s.ch.push(
+          SessionHistory(
+            inReplyTo: 'after-new',
+            sessionStartedAt: 0,
+            events: const [],
+            eos: true,
+            // truncated defaults to false: the Pi sent everything it has.
+          ),
+        );
+        await _settle();
+
+        expect(
+          messages(s.epk),
+          isEmpty,
+          reason: 'a complete, empty history means the session really is empty',
+        );
+      },
+    );
+
+    test('a truncated window with an empty box is just the window', () async {
+      final s = await setup();
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'first',
+          sessionStartedAt: 0,
+          events: const [UserInputEvt(ts: 9, id: 'u9', text: 'late')],
+          eos: true,
+          truncated: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((m) => m.text), ['late']);
+    });
+  });
+
   // Plan 61 Phase 3 follow-up — the relay can tell us the destination was not
   // there at all. That is strictly stronger than "no echo yet", so the pending
   // rows must be reaped NOW rather than each burning the rest of its window.

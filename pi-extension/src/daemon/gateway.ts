@@ -214,7 +214,22 @@ export class Gateway {
     if (!relay) return;
     const ct = Buffer.from(JSON.stringify(frame)).toString("base64");
     try {
-      relay.send(JSON.stringify({ peer, room: CONTROL_ROOM_ID, ct }));
+      // The outer `room` names the DESTINATION's room, not ours.
+      //
+      // This used to say `room: CONTROL_ROOM_ID`, which addressed
+      // `(app, "ctrl")` — a registry key that does not exist, because the app
+      // always registers at `main` (`ws_transport.dart` hello). The relay
+      // dropped every control reply, answered US with `transport_error:
+      // offline`, and `onLine` discarded that. The visible symptom was every
+      // control RPC timing out after 45s while the machine looked perfectly
+      // online — i.e. the whole control plane was dead end-to-end.
+      //
+      // Omitting `room` matches `PlainPeerChannel.send` (the chat path, which
+      // has always worked) and lets the relay apply its documented default of
+      // `main`. Do not "fix" this by naming a room: the app's room is not ours
+      // to know, and hardcoding `main` would break the day it registers
+      // elsewhere.
+      relay.send(JSON.stringify({ peer, ct }));
     } catch {
       // Relay mid-reconnect. The caller retries with the same idempotency key,
       // which replays the recorded outcome instead of re-spawning.
