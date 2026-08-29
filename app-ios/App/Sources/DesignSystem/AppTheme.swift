@@ -106,6 +106,12 @@ private struct RemotePiThemeModifier: ViewModifier {
             .environment(\.theme, theme)
             .tint(theme.colors.accent)
             .foregroundStyle(theme.colors.text)
+            // Terminal redesign: every *system*-font surface — Settings forms,
+            // navigation titles, alerts' SwiftUI content, ContentUnavailable
+            // fallbacks — renders monospaced too, so screens built from stock
+            // components don't read as a different app. Views that set an
+            // explicit `theme.type` font are unaffected.
+            .fontDesign(.monospaced)
             .background(theme.colors.bg.ignoresSafeArea())
             .preferredColorScheme(mode.preferredColorScheme)
     }
@@ -123,6 +129,7 @@ extension View {
         environment(\.theme, theme)
             .tint(theme.colors.accent)
             .foregroundStyle(theme.colors.text)
+            .fontDesign(.monospaced)
             .background(theme.colors.bg.ignoresSafeArea())
     }
 }

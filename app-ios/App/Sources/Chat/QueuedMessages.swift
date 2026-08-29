@@ -169,11 +169,11 @@ struct QueuedMessagePreview: View {
         }
         .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 8))
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(theme.colors.accent.opacity(0.10))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(theme.colors.accent.opacity(0.35), lineWidth: AppMetrics.hairline)
         )
         .contentShape(Rectangle())

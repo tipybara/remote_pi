@@ -42,8 +42,10 @@ struct RelayStepView: View {
                 } footer: {
                     footer
                 }
+                .listRowBackground(theme.colors.surface)
             }
             .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .scrollBounceBehavior(.basedOnSize)
 
             HStack(spacing: 12) {

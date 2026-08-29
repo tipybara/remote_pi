@@ -64,6 +64,15 @@ enum UserBubbleStatus: Hashable, Sendable {
     }
 }
 
+/// Terminal redesign (2026-08-29): the user's message is a **prompt line**,
+/// not a chat bubble. `❯ text` in the accent green, left-aligned and full
+/// width — the transcript reads like a terminal scrollback: what you typed at
+/// the prompt, then what the machine printed. The right-aligned card this
+/// replaces was the one element that made the screen read as iMessage.
+///
+/// The lifecycle survives as color + badge instead of card chrome: pending
+/// dims the line, failed turns the prompt glyph red and keeps the
+/// "not delivered" badge (now leading, under the line it describes).
 struct UserBubble: View {
     let row: MessageRow
     var status: UserBubbleStatus = .confirmed
@@ -74,16 +83,34 @@ struct UserBubble: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            bubble
+        VStack(alignment: .leading, spacing: 4) {
+            promptLine
                 .opacity(status == .pending || status == .steering ? 0.6 : 1)
             badge
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var glyphColor: Color {
+        status == .failed ? theme.colors.error : theme.colors.accent
     }
 
     @ViewBuilder
-    private var bubble: some View {
+    private var promptLine: some View {
+        // Baseline-aligned HStack rather than one concatenated Text, so a
+        // wrapped message hang-indents under its own first character instead
+        // of under the glyph — exactly how a shell continuation line sits.
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("❯")
+                .font(theme.type.mono(13, weight: .bold))
+                .foregroundStyle(glyphColor)
+                .accessibilityHidden(true)
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let attachment = row.attachments.first {
             // Plan 30 decision #7: no tap, no zoom, no full-screen. The
             // thumbnail is the whole feature.
@@ -93,29 +120,14 @@ struct UserBubble: View {
                 isFailed: status == .failed,
                 provider: imageProvider
             )
-            .frame(maxWidth: AppMetrics.userBubbleMaxWidth, alignment: .trailing)
+            .frame(maxWidth: AppMetrics.userBubbleMaxWidth, alignment: .leading)
         } else {
             Text(row.text)
-                .font(theme.type.sansBody)
+                .font(theme.type.mono(13))
                 .foregroundStyle(theme.colors.text)
                 .textSelection(.enabled)
                 .multilineTextAlignment(.leading)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 10)
-                .frame(maxWidth: AppMetrics.userBubbleMaxWidth, alignment: .leading)
-                .background(theme.colors.userBubble)
-                .clipShape(
-                    RoundedRectangle(cornerRadius: AppMetrics.radiusBubble, style: .continuous)
-                )
-                .overlay {
-                    if status == .failed {
-                        RoundedRectangle(
-                            cornerRadius: AppMetrics.radiusBubble,
-                            style: .continuous
-                        )
-                        .strokeBorder(theme.colors.error, lineWidth: AppMetrics.hairline)
-                    }
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -130,20 +142,20 @@ struct UserBubble: View {
                     .controlSize(.mini)
                     .tint(theme.colors.muted)
                 Text(status == .steering ? "steering…" : "sending…")
-                    .font(theme.type.sans(11))
+                    .font(theme.type.mono(11))
                     .foregroundStyle(theme.colors.muted)
             }
-            .padding(.trailing, 4)
+            .padding(.leading, 18)
         case .failed:
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.circle")
                     .font(.system(size: 12))
                     .foregroundStyle(theme.colors.error)
                 Text("not delivered")
-                    .font(theme.type.sans(11))
+                    .font(theme.type.mono(11))
                     .foregroundStyle(theme.colors.error)
             }
-            .padding(.trailing, 4)
+            .padding(.leading, 18)
             .accessibilityElement(children: .combine)
         }
     }
@@ -260,7 +272,7 @@ struct AttachmentThumbnail: View {
             content
             if !caption.isEmpty {
                 Text(caption)
-                    .font(theme.type.sansBody)
+                    .font(theme.type.mono(13))
                     .foregroundStyle(theme.colors.text)
                     .padding(.horizontal, 13)
                     .padding(.vertical, 10)

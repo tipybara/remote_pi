@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Semantic color tokens for the whole app — the SINGLE source of truth.
 ///
-/// Ported 1:1 from `app/lib/ui/core/themes/app_colors.dart` (both palettes).
-/// Every hex below is the Flutter value; do not "improve" one here without
-/// changing it there, or the two clients drift.
+/// Originally ported 1:1 from `app/lib/ui/core/themes/app_colors.dart`; the
+/// 2026-08-29 terminal redesign deliberately DIVERGED from the Flutter values
+/// (this client owns its own visual identity now). The token *names* still
+/// match the Dart so anyone reading both clients can map them.
 ///
 /// ## How a screen uses this
 ///
@@ -71,52 +72,60 @@ struct AppColors: Equatable, Sendable {
     /// glare (`AppTypography.fromColors(monoColor:)`).
     let monoText: Color
 
-    /// Dark palette — the product's default look.
+    /// Dark palette — the product's default look (redesigned 2026-08-29).
+    ///
+    /// A phosphor terminal, tuned rather than cosplayed: near-black ground
+    /// (true #000 makes hairlines invisible on OLED), a green prompt accent,
+    /// and semantic colors lifted from the GitHub-dark family because they are
+    /// the most battle-tested "status colors on a dark code surface" set in
+    /// existence. No scanlines, no glow — type and color do the talking.
     static let dark = AppColors(
-        bg: Color(hex: 0x000000),
-        surface: Color(hex: 0x0A0A0A),
-        border: Color(hex: 0x1A1A1A),
-        text: Color(hex: 0xFFFFFF),
-        muted: Color(hex: 0x6B6B6B),
-        muted2: Color(hex: 0x8A8A8A),
-        accent: Color(hex: 0x00D4FF),
-        onAccent: Color(hex: 0x000000),
-        highlight: Color(hex: 0x9FE6FF),
-        success: Color(hex: 0x6CD28A),
-        error: Color(hex: 0xE5484D),
-        warning: Color(hex: 0xFFB300),
-        working: Color(hex: 0x3FA9F5),
-        codeBg: Color(hex: 0x050505),
-        userBubble: Color(hex: 0x1A1A1A),
-        modelBadgeBg: Color(hex: 0x161616),
-        modelBadgeBorder: Color(hex: 0x1F1F1F),
-        denyBorder: Color(hex: 0x2A2A2A),
-        inputFill: Color(hex: 0x0E0E0E),
-        monoText: Color(hex: 0xE6E6E6)
+        bg: Color(hex: 0x0A0D10),
+        surface: Color(hex: 0x11161C),
+        border: Color(hex: 0x232C36),
+        text: Color(hex: 0xC9D4E3),
+        muted: Color(hex: 0x596B7E),
+        muted2: Color(hex: 0x8494A7),
+        accent: Color(hex: 0x39D353),
+        onAccent: Color(hex: 0x0A0D10),
+        highlight: Color(hex: 0x79C0FF),
+        success: Color(hex: 0x39D353),
+        error: Color(hex: 0xF85149),
+        warning: Color(hex: 0xE3B341),
+        working: Color(hex: 0x39C5CF),
+        codeBg: Color(hex: 0x0D1218),
+        userBubble: Color(hex: 0x11161C),
+        modelBadgeBg: Color(hex: 0x141B22),
+        modelBadgeBorder: Color(hex: 0x232C36),
+        denyBorder: Color(hex: 0x372E31),
+        inputFill: Color(hex: 0x0E1319),
+        monoText: Color(hex: 0xC9D4E3)
     )
 
-    /// Light palette — foreground tints tuned for AA contrast on white.
+    /// Light palette — a paper terminal: warm off-white ground, ink text,
+    /// green ink accent. Every foreground re-tuned for WCAG-AA on the paper
+    /// tone (the dark theme's phosphor values wash out here).
     static let light = AppColors(
-        bg: Color(hex: 0xFFFFFF),
-        surface: Color(hex: 0xF4F4F5),
-        border: Color(hex: 0xDADADD),
-        text: Color(hex: 0x0A0A0A),
-        muted: Color(hex: 0x565656),
-        muted2: Color(hex: 0x424242),
-        accent: Color(hex: 0x0077A3),
-        onAccent: Color(hex: 0xFFFFFF),
-        highlight: Color(hex: 0x005F82),
-        success: Color(hex: 0x1E7A41),
-        error: Color(hex: 0xC42026),
-        warning: Color(hex: 0x9A6300),
-        working: Color(hex: 0x1A6CB0),
-        codeBg: Color(hex: 0xF0F0F0),
-        userBubble: Color(hex: 0xEAEAEC),
-        modelBadgeBg: Color(hex: 0xEDEDEF),
-        modelBadgeBorder: Color(hex: 0xD7D7DA),
-        denyBorder: Color(hex: 0xC9C9CD),
-        inputFill: Color(hex: 0xF0F0F2),
-        monoText: Color(hex: 0x1A1A1A)
+        bg: Color(hex: 0xFAF9F5),
+        surface: Color(hex: 0xF1EFE8),
+        border: Color(hex: 0xDCD8CC),
+        text: Color(hex: 0x24292F),
+        muted: Color(hex: 0x6E7B70),
+        muted2: Color(hex: 0x57606A),
+        accent: Color(hex: 0x1A7F37),
+        onAccent: Color(hex: 0xFAF9F5),
+        highlight: Color(hex: 0x0969DA),
+        success: Color(hex: 0x1A7F37),
+        error: Color(hex: 0xCF222E),
+        warning: Color(hex: 0x9A6700),
+        working: Color(hex: 0x1B7C8C),
+        codeBg: Color(hex: 0xF1EFE8),
+        userBubble: Color(hex: 0xF1EFE8),
+        modelBadgeBg: Color(hex: 0xECE9E0),
+        modelBadgeBorder: Color(hex: 0xDCD8CC),
+        denyBorder: Color(hex: 0xE0C9BE),
+        inputFill: Color(hex: 0xF3F1EA),
+        monoText: Color(hex: 0x24292F)
     )
 }
 

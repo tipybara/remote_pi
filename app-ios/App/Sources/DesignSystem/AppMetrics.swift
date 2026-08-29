@@ -30,8 +30,6 @@ enum AppMetrics {
     // Named sizes from the spec
     /// Presence dot diameter (§7.6.1).
     static let presenceDot: CGFloat = 10
-    /// Session-tile avatar (§7.6).
-    static let avatar: CGFloat = 40
     /// Chat top bar height (§8.2). Fixed, not a `NavigationBar`.
     static let chatBarHeight: CGFloat = 56
     /// Master column width in the tablet split (§11.1).

@@ -26,12 +26,12 @@ struct RevokedBanner: View {
                 .rotationEffect(.degrees(45))
                 .font(.system(size: 13, weight: .semibold))
             Text(message)
-                .font(theme.type.sans(12, weight: .medium))
+                .font(theme.type.mono(12, weight: .medium))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onRePair) {
                 Text("Re-pair")
-                    .font(theme.type.sans(12, weight: .semibold))
+                    .font(theme.type.mono(12, weight: .semibold))
                     .underline()
             }
             .buttonStyle(.plain)

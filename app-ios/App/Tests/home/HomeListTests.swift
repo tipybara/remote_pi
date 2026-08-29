@@ -306,16 +306,30 @@ final class HomeListTests: XCTestCase {
     func testPathLineOnlyWhenItAddsInformation() {
         XCTAssertNil(HomeListBuilder.pathLine(path: "", title: "Unknown folder"))
         XCTAssertNil(HomeListBuilder.pathLine(path: "proj", title: "proj"))
+        // Terminal redesign: home-rooted paths render `~`-abbreviated.
         XCTAssertEqual(
             HomeListBuilder.pathLine(path: "/Users/me/proj", title: "proj"),
-            "/Users/me/proj"
+            "~/proj"
         )
-        // Long paths are truncated from the FRONT — the tail disambiguates.
-        let long = "/Users/someone/with/a/very/long/path/that/keeps/going/api"
+        // Long paths are truncated from the FRONT — the tail disambiguates —
+        // and the abbreviation happens FIRST, so it buys back tail characters.
+        let long = "/Users/someone/with/a/very/long/path/that/keeps/going/on/and/api"
         let line = HomeListBuilder.pathLine(path: long, title: "api")!
         XCTAssertTrue(line.hasPrefix("…"))
         XCTAssertTrue(line.hasSuffix("api"))
         XCTAssertEqual(line.count, 42)
+    }
+
+    func testTildeAbbreviationOnlyForHomeRootedPaths() {
+        XCTAssertEqual(tildeAbbreviatedPath("/Users/yang/workspace/api"), "~/workspace/api")
+        XCTAssertEqual(tildeAbbreviatedPath("/home/pi/proj"), "~/proj")
+        // The home directory itself.
+        XCTAssertEqual(tildeAbbreviatedPath("/Users/yang"), "~")
+        // Not home-rooted: untouched. Never guess.
+        XCTAssertEqual(tildeAbbreviatedPath("/opt/srv/api"), "/opt/srv/api")
+        XCTAssertEqual(tildeAbbreviatedPath("/Users"), "/Users")
+        XCTAssertEqual(tildeAbbreviatedPath("/Users/"), "/Users/")
+        XCTAssertEqual(tildeAbbreviatedPath(""), "")
     }
 
     // MARK: Counts

@@ -112,24 +112,19 @@ final class HomeE2ETests: XCTestCase {
         // (`Device / folder`) goes last on purpose: the grouping is persisted,
         // so a test that walks away from the default leaves every later run —
         // and every later screenshot — in a state nobody chose.
+        //
+        // Since the HIG redesign the grouping lives inside the combined
+        // Filter menu (there is no standalone grouping button any more).
         for (mode, shot) in [
             ("No grouping", "grouping-none"),
             ("Device only", "grouping-device-only"),
             ("Device / folder", "grouping-device-folder"),
         ] {
-            let menu = app.buttons["Group sessions by"]
-            require(menu, "the grouping menu button")
-            menu.tap()
+            XCTAssertTrue(app.openFilterMenu(), "the Filter menu never opened")
 
-            let option = app.buttons[mode].firstMatch
-            if option.waitForExistence(timeout: 5) {
-                option.tap()
-            } else {
-                // Some SwiftUI Picker-in-Menu renderings expose rows as cells.
-                let cell = app.cells[mode].firstMatch
-                require(cell, "the '\(mode)' grouping option")
-                cell.tap()
-            }
+            let option = app.menuRow(exact: mode)
+            require(option, "the '\(mode)' grouping option")
+            option.tap()
 
             waitUntil("the list to settle after choosing \(mode)", timeout: 15) {
                 !app.sessionTiles.isEmpty
@@ -144,40 +139,47 @@ final class HomeE2ETests: XCTestCase {
         }
     }
 
-    // MARK: - Filter tabs
+    // MARK: - Filter menu
 
-    /// The online / offline / all tabs (spec 08 §7.3).
+    /// The online / offline / all visibility filter — menu rows since the HIG
+    /// redesign folded the tabs into the toolbar menu (spec 08 §7.3).
     ///
     /// Asserts the arithmetic as well as the render: `all == online + offline`
     /// is the invariant that catches a filter applied to the wrong collection.
+    /// Ends on All so the persisted filter never strands a later run (or the
+    /// user) staring at an empty Online list.
     func test03_filterTabs() {
         let app = launchApp()
         waitUntil("sessions to arrive", timeout: 60) { app.sessionTiles.count >= 2 }
 
+        var counts: [String: Int] = [:]
         for (tab, shot) in [
-            ("All", "filter-all"),
             ("Online", "filter-online"),
             ("Offline", "filter-offline"),
+            ("All", "filter-all"),
         ] {
-            let button = app.filterTab(tab)
-            require(button, "the \(tab) filter tab")
-            button.tap()
+            XCTAssertTrue(app.openFilterMenu(), "the Filter menu never opened")
+            // Read the count off the open menu, then select the row (which
+            // closes the menu) and check the list renders exactly that many.
+            let count = app.filterMenuCount(tab)
+            XCTAssertNotNil(count, "the '\(tab)' menu row lost its count")
+            counts[tab] = count
+
+            app.filterMenuRow(tab).tap()
             _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1.5)
             capture(shot)
 
-            let count = app.filterTabCount(tab)
-            XCTAssertNotNil(count, "\(tab) tab lost its count")
             if let count {
                 XCTAssertEqual(
                     app.sessionTiles.count, count,
-                    "\(tab) tab says \(count) but rendered \(app.sessionTiles.count) tiles"
+                    "\(tab) says \(count) but rendered \(app.sessionTiles.count) tiles"
                 )
             }
         }
 
-        let all = app.filterTabCount("All") ?? -1
-        let online = app.filterTabCount("Online") ?? -1
-        let offline = app.filterTabCount("Offline") ?? -1
+        let all = counts["All"] ?? -1
+        let online = counts["Online"] ?? -1
+        let offline = counts["Offline"] ?? -1
         XCTAssertEqual(
             all, online + offline,
             "All (\(all)) must equal Online (\(online)) + Offline (\(offline))"
@@ -197,10 +199,9 @@ final class HomeE2ETests: XCTestCase {
         let app = launchApp()
         waitUntil("sessions to arrive", timeout: 60) { app.sessionTiles.count >= 2 }
 
-        // Rename from the All tab so the assertion is not confounded by a
-        // presence flip moving the row between tabs.
-        let allTab = app.filterTab("All")
-        if allTab.exists { allTab.tap() }
+        // Rename from the All filter so the assertion is not confounded by a
+        // presence flip moving the row between filters.
+        app.selectFilter("All")
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
 
         let before = app.sessionNames
@@ -215,7 +216,8 @@ final class HomeE2ETests: XCTestCase {
         let tile = app.sessionTiles[index]
         tile.press(forDuration: 0.8)
 
-        let renameRow = app.buttons["Rename session"].firstMatch
+        // The context menu's row (labelled just "Rename" since the HIG pass).
+        let renameRow = app.buttons["Rename"].firstMatch
         require(renameRow, "the long-press menu's Rename row")
         capture("rename-menu")
         renameRow.tap()
@@ -279,15 +281,18 @@ final class HomeE2ETests: XCTestCase {
         let app = launchApp()
         waitUntil("sessions to arrive", timeout: 60) { !app.sessionTiles.isEmpty }
 
-        let online = app.filterTab("Online")
-        if online.exists { online.tap() }
-        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
-
+        // Pick a LIVE tile by its own presence suffix instead of switching
+        // the visibility filter: the filter is persisted, and a test that
+        // leaves it on Online strands every later launch (and the user) on an
+        // empty list whenever nothing happens to be live.
         let tiles = app.sessionTiles
-        XCTAssertFalse(tiles.isEmpty, "no online session to open")
+        let live = tiles.filter {
+            $0.label.hasSuffix(", online") || $0.label.hasSuffix(", working")
+        }
+        XCTAssertFalse(live.isEmpty, "no online session to open")
         let target = Env.chatSession.isEmpty
-            ? tiles[0]
-            : tiles.first { $0.label.contains(Env.chatSession) } ?? tiles[0]
+            ? live[0]
+            : live.first { $0.label.contains(Env.chatSession) } ?? live[0]
         target.tap()
 
         let field = app.control("input-bar-field")
@@ -338,24 +343,35 @@ final class HomeE2ETests: XCTestCase {
         let app = launchApp()
         waitUntil("sessions to arrive", timeout: 60) { !app.sessionTiles.isEmpty }
 
-        let allTab = app.filterTab("All")
-        if allTab.exists { allTab.tap() }
+        // Counts live inside the Filter menu since the HIG redesign. The
+        // LED suffix on each tile is a cheaper live signal, so the polling
+        // loop reads tiles and only the bookend assertions open the menu.
+        app.selectFilter("All")
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
 
-        let onlineBefore = app.filterTabCount("Online") ?? 0
-        XCTAssertGreaterThan(onlineBefore, 0, "nothing was online to begin with")
+        func liveTileCount() -> Int {
+            app.sessionTiles.filter {
+                $0.label.hasSuffix(", online") || $0.label.hasSuffix(", working")
+            }.count
+        }
+
+        XCTAssertGreaterThan(liveTileCount(), 0, "nothing was online to begin with")
         capture("offline-before")
 
         // The host kills fake-pi during this window.
         waitUntil("every room to be reported offline", timeout: 120, poll: 1) {
-            (app.filterTabCount("Online") ?? -1) == 0
+            liveTileCount() == 0
         }
         capture("offline-after")
 
-        XCTAssertEqual(app.filterTabCount("Online"), 0)
-        XCTAssertEqual(
-            app.filterTabCount("Offline"), app.filterTabCount("All"),
-            "every session should have flipped to Offline"
-        )
+        XCTAssertTrue(app.openFilterMenu(), "the Filter menu never opened")
+        let online = app.filterMenuCount("Online")
+        let offline = app.filterMenuCount("Offline")
+        let all = app.filterMenuCount("All")
+        // Choosing All closes the menu and leaves the persisted filter sane.
+        app.filterMenuRow("All").tap()
+
+        XCTAssertEqual(online, 0)
+        XCTAssertEqual(offline, all, "every session should have flipped to Offline")
     }
 }

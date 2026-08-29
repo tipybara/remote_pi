@@ -93,3 +93,23 @@ func headTruncatedPath(_ path: String, budget: Int = 42) -> String {
     guard path.count > budget, budget > 1 else { return path }
     return "…" + String(path.suffix(budget - 1))
 }
+
+/// `/Users/yang/workspace/api` → `~/workspace/api`.
+///
+/// Display-only shorthand (terminal redesign): the phone cannot know the Pi's
+/// real `$HOME`, so this recognizes the two conventional layouts —
+/// `/Users/<name>` (macOS) and `/home/<name>` (Linux) — and abbreviates only
+/// when the path starts there. Anything else passes through untouched, and
+/// nothing that *stores or sends* a path may ever use this.
+func tildeAbbreviatedPath(_ path: String) -> String {
+    for root in ["/Users/", "/home/"] {
+        guard path.hasPrefix(root) else { continue }
+        let rest = path.dropFirst(root.count)
+        guard let slash = rest.firstIndex(of: "/") else {
+            // `/Users/yang` exactly — the home dir itself.
+            return rest.isEmpty ? path : "~"
+        }
+        return "~" + rest[slash...]
+    }
+    return path
+}

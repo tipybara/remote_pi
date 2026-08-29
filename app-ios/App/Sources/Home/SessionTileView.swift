@@ -1,18 +1,19 @@
 import RemotePiProtocol
 import SwiftUI
 
-/// One row of the Home list (spec 08 §7.6) — HIG edition.
+/// One row of the Home list — terminal edition (2026-08-29).
 ///
-/// Avatar → title block → presence dot, as a standard List row: system text
-/// styles so Dynamic Type works, default row insets, no custom selection
-/// painting (the List row background carries that, see `HomeScreen.tile`).
-/// The long-press menu moved to a real `.contextMenu` and the actions to
-/// `.swipeActions`, both attached by the screen — this view is content only.
+/// `❯ title` over a one-line detail, with a square presence LED trailing. The
+/// initial-letter avatar is gone: a terminal session list identifies rows by
+/// their prompt, and the 40pt circle was the single largest consumer of row
+/// height. The prompt glyph carries the presence *color* as reinforcement,
+/// but the LED remains the canonical indicator (and the VoiceOver label lives
+/// there) — color on the glyph is decoration, never the only signal.
 ///
-/// The subtitle is **always exactly one line**. That is a layout invariant,
-/// not a style choice: switching the grouping moves the folder/machine label
-/// onto the tile, and if that wrapped, every row on screen would change height
-/// and the whole list would jump — the exact failure plan 61 is about.
+/// The detail line is **always exactly one line**. Layout invariant, not
+/// style: switching the grouping moves the folder/machine label onto the
+/// row, and if that wrapped, every row on screen would change height and the
+/// whole list would jump — the exact failure plan 61 is about.
 struct SessionTileView: View {
     let row: HomeRow
     let presence: PresenceLevel
@@ -22,54 +23,69 @@ struct SessionTileView: View {
 
     var body: some View {
         Button(action: open) {
-            HStack(spacing: 12) {
-                Avatar(title: row.title)
-                titleBlock
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("❯")
+                    .font(theme.type.mono(15, weight: .bold))
+                    .foregroundStyle(promptColor)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.title)
+                        .font(theme.type.mono(15, weight: .semibold))
+                        .foregroundStyle(theme.colors.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    detailLine
+                }
+
                 Spacer(minLength: 8)
-                PresenceDot(level: presence)
+
+                PresenceDot(level: presence, diameter: 8)
+                    // Optically align the LED with the title baseline row
+                    // rather than the HStack's text baseline (a square has
+                    // no baseline of its own).
+                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
             }
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
     }
 
-    private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(row.title)
-                .font(.body.weight(.medium))
-                .foregroundStyle(theme.colors.text)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            subtitle
+    /// The prompt echoes the presence color; offline stays muted so a dead
+    /// session's row visibly recedes.
+    private var promptColor: Color {
+        switch presence {
+        case .working: theme.colors.working
+        case .reconnecting: theme.colors.warning
+        case .live: theme.colors.accent
+        case .offline: theme.colors.muted
         }
     }
 
-    /// One line, built as a single `Text` so the two halves share a truncation
-    /// budget instead of each reserving its own.
+    /// One line, one `Text`, so the halves share a truncation budget.
     @ViewBuilder
-    private var subtitle: some View {
+    private var detailLine: some View {
         let detail = detailText
         Group {
             if let context = row.contextLabel, !context.isEmpty {
                 Text(context).foregroundStyle(theme.colors.muted)
-                    + Text("  ·  ").foregroundStyle(theme.colors.muted)
+                    + Text("  ").foregroundStyle(theme.colors.muted)
                     + detail
             } else {
                 detail
             }
         }
-        .font(.footnote)
+        .font(theme.type.mono(11.5))
         .lineLimit(1)
         .truncationMode(.tail)
     }
 
     private var detailText: Text {
         switch row.detail {
-        // The model name is code-ish content; monospaced is information here
-        // (it reads as an identifier), not branding.
         case .model(let name):
-            Text(name).font(.footnote.monospaced()).foregroundStyle(theme.colors.accent)
+            Text(name).foregroundStyle(theme.colors.muted2)
         case .lastPaired(let when):
             Text(when).foregroundStyle(theme.colors.muted)
         }

@@ -282,9 +282,11 @@ enum HomeListBuilder {
     }
 
     /// Show the path only when it says something the folder name does not.
+    /// `~`-abbreviated first (terminal redesign), then head-truncated — in
+    /// that order, so the abbreviation buys back real characters of tail.
     static func pathLine(path: String, title: String) -> String? {
         guard !path.isEmpty, path != title else { return nil }
-        return headTruncatedPath(path)
+        return headTruncatedPath(tildeAbbreviatedPath(path))
     }
 
     private static func lastPathSegment(of path: String?) -> String? {

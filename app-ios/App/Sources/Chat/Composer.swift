@@ -565,43 +565,58 @@ struct ComposerBar: View {
     }
 
     private var field: some View {
-        TextField(
-            "",
-            text: $model.draft,
-            prompt: Text(model.placeholder).foregroundStyle(theme.colors.muted),
-            axis: .vertical
-        )
+        // Terminal redesign: the field carries a literal `❯` prompt — typing
+        // here IS typing at the session's prompt, and this glyph is the same
+        // one the transcript prints in front of every sent message. It sits
+        // outside the TextField (decoration, hidden from VoiceOver) and dims
+        // with the field when composing is disabled.
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("❯")
+                .font(theme.type.mono(13, weight: .bold))
+                .foregroundStyle(model.isDisabled ? theme.colors.muted : theme.colors.accent)
+                .accessibilityHidden(true)
+            // Focus, key handling and the a11y identifier stay ON the
+            // TextField: hoisting them to the HStack makes the container the
+            // element named `input-bar-field`, and a UI test (or switch
+            // control) that taps it lands on the glyph instead of the field.
+            TextField(
+                "",
+                text: $model.draft,
+                prompt: Text(model.placeholder).foregroundStyle(theme.colors.muted),
+                axis: .vertical
+            )
+            .focused($fieldFocused)
+            .onKeyPress(keys: [.return]) { press in
+                switch model.handleReturnKey(shiftPressed: press.modifiers.contains(.shift)) {
+                case .ignored:
+                    return .ignored
+                case .insertedNewline:
+                    return .handled
+                case .submit:
+                    Task { await model.submit() }
+                    return .handled
+                }
+            }
+            .accessibilityIdentifier("input-bar-field")
+        }
         .font(theme.type.mono(13))
         .foregroundStyle(theme.colors.text)
         .tint(theme.colors.accent)
         .lineLimit(1...6)
         .disabled(model.isDisabled)
-        .focused($fieldFocused)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 19, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(theme.colors.inputFill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 19, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(
                     fieldFocused ? theme.colors.accent : theme.colors.border,
                     lineWidth: fieldFocused ? 1.2 : AppMetrics.hairline
                 )
         )
-        .onKeyPress(keys: [.return]) { press in
-            switch model.handleReturnKey(shiftPressed: press.modifiers.contains(.shift)) {
-            case .ignored:
-                return .ignored
-            case .insertedNewline:
-                return .handled
-            case .submit:
-                Task { await model.submit() }
-                return .handled
-            }
-        }
-        .accessibilityIdentifier("input-bar-field")
     }
 
     private var quickActionsButton: some View {
@@ -677,10 +692,11 @@ struct ComposerBar: View {
 
     private func primaryButtonFace(_ action: ComposerPrimaryAction) -> some View {
         let enabled = !model.isDisabled || action == .cancel
-        return Circle()
+        // A square key, not a glowing orb — matches the button geometry of the
+        // rest of the terminal skin. No shadow: type and color do the talking.
+        return RoundedRectangle(cornerRadius: 6, style: .continuous)
             .fill(enabled ? theme.colors.accent : theme.colors.muted.opacity(0.3))
             .frame(width: 38, height: 38)
-            .shadow(color: enabled ? theme.colors.accent.opacity(0.33) : .clear, radius: 8)
             .overlay {
                 Image(systemName: action.symbol)
                     .font(.system(size: 17, weight: .semibold))
@@ -689,7 +705,7 @@ struct ComposerBar: View {
                     .transition(.opacity.combined(with: .scale))
             }
             .animation(.easeOut(duration: 0.18), value: action)
-            .contentShape(Circle())
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .accessibilityLabel(action.accessibilityLabel)
             .accessibilityIdentifier("input-bar-action")
             // This is a `Circle` with a gesture, not a `Button`, because the
@@ -731,8 +747,14 @@ struct ComposerBar: View {
                 .font(.system(size: 16))
                 .foregroundStyle(theme.colors.error)
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(theme.colors.error.opacity(0.14)))
-                .overlay(Circle().stroke(theme.colors.error.opacity(0.55), lineWidth: AppMetrics.hairline))
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(theme.colors.error.opacity(0.14))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(theme.colors.error.opacity(0.55), lineWidth: AppMetrics.hairline)
+                )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Stop the current response")
@@ -779,11 +801,11 @@ struct ComposerBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(theme.colors.surface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(theme.colors.border, lineWidth: AppMetrics.hairline)
         )
         .padding(.bottom, 10)

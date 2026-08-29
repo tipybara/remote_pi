@@ -117,7 +117,11 @@ extension XCUIApplication {
     /// combining its children (`title, model, presence`). The chrome buttons
     /// (tabs, `+`, gear, grouping) are excluded by label.
     var sessionTiles: [XCUIElement] {
-        let chrome: Set<String> = ["New session", "Settings", "Group sessions by"]
+        let chrome: Set<String> = [
+            "New session", "New Session", "Settings", "Filter",
+            // pre-HIG chrome, kept so the filter stays harmless on old builds
+            "Group sessions by",
+        ]
         return buttons.allElementsBoundByIndex.filter { element in
             guard element.exists else { return false }
             let label = element.label
@@ -143,12 +147,62 @@ extension XCUIApplication {
         }
     }
 
-    /// A filter tab by name, matched on the "Name, count" label shape so the
-    /// count does not have to be known.
-    func filterTab(_ name: String) -> XCUIElement {
+    // MARK: The Filter menu (HIG redesign, 2026-08-26)
+    //
+    // The visibility filter and the grouping merged into ONE toolbar menu —
+    // the Mail pattern. The old standalone tabs and the "Group sessions by"
+    // button no longer exist; everything below drives the menu.
+
+    /// The toolbar button that opens the combined filter + grouping menu.
+    var filterMenuButton: XCUIElement { buttons["Filter"].firstMatch }
+
+    /// Open the menu and return whether it is showing (menu rows exist).
+    @discardableResult
+    func openFilterMenu(timeout: TimeInterval = 10) -> Bool {
+        guard filterMenuButton.waitForExistence(timeout: timeout) else { return false }
+        filterMenuButton.tap()
+        return filterMenuRow("All").waitForExistence(timeout: 5)
+    }
+
+    /// A row of the open menu, matched as "<name> (<count>)" so the count
+    /// does not have to be known. Also matches the grouping rows when handed
+    /// their exact labels ("No grouping", …) via `menuRow(exact:)`.
+    func filterMenuRow(_ name: String) -> XCUIElement {
         buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "\(name), ")
+            NSPredicate(format: "label BEGINSWITH %@", "\(name) (")
         ).firstMatch
+    }
+
+    /// A menu row by its exact label (the grouping options carry no count).
+    func menuRow(exact label: String) -> XCUIElement {
+        let button = buttons[label].firstMatch
+        if button.exists { return button }
+        // Some SwiftUI Picker-in-Menu renderings expose rows as cells.
+        return cells[label].firstMatch
+    }
+
+    /// The count baked into an open menu's "<name> (<count>)" row, or `nil`
+    /// when the row is not visible (menu closed).
+    func filterMenuCount(_ name: String) -> Int? {
+        let row = filterMenuRow(name)
+        guard row.exists else { return nil }
+        let label = row.label
+        guard let open = label.lastIndex(of: "("),
+              let close = label.lastIndex(of: ")"),
+              open < close
+        else { return nil }
+        return Int(label[label.index(after: open)..<close])
+    }
+
+    /// Open the menu and choose a visibility filter. Selecting closes it.
+    func selectFilter(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(openFilterMenu(), "the Filter menu never opened", file: file, line: line)
+        let row = filterMenuRow(name)
+        XCTAssertTrue(
+            row.waitForExistence(timeout: 5),
+            "no '\(name) (…)' row in the Filter menu", file: file, line: line
+        )
+        row.tap()
     }
 
     /// An element by accessibility identifier, whatever type it is exposed as.
@@ -161,10 +215,4 @@ extension XCUIApplication {
         descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
-    /// The count rendered on a filter tab, or `nil` when the tabs are hidden.
-    func filterTabCount(_ name: String) -> Int? {
-        let tab = filterTab(name)
-        guard tab.exists else { return nil }
-        return Int(tab.label.split(separator: " ").last.map(String.init) ?? "")
-    }
 }

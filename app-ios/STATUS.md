@@ -3,6 +3,27 @@
 Handover snapshot, **2026-08-25**, after the first genuine end-to-end run
 against a real relay and a real Pi-side peer.
 
+> **Addendum 2026-08-29 — terminal reskin.** The whole frontend was restyled
+> around "the phone is a terminal into your Mac": monospaced type everywhere
+> (Dynamic-Type-scaled through `UIFontMetrics`), a phosphor-dark / paper-light
+> palette pair in `AppColors`, `❯` prompt rows on Home and for user messages
+> in the chat (the right-aligned bubble is gone), square presence LEDs that
+> blink while working, 6pt slab corners on buttons/fields, `~`-abbreviated
+> workspace paths, and a `❯` prompt prefix in the composer. Structure is
+> untouched — everything the HIG pass (2026-08-26) established still holds:
+> one server, swipe actions, context menus, pull-to-refresh, the merged
+> filter+grouping toolbar menu. `Avatar.swift` was deleted.
+>
+> Numbers below that moved: `RemotePiAppTests` is now **397** (295 XCTest +
+> 102 swift-testing). The E2E harness was updated for the merged Filter menu
+> (the standalone tabs and "Group sessions by" button it drove no longer
+> exist); tests 01–05 re-verified green on 2026-08-29 (05 in both palettes),
+> 00/06 not re-run (00 needs the pasteboard payload, 06 a manual fake-pi
+> kill). One real regression was caught and fixed by the harness: the field's
+> a11y identifier had moved onto the prompt-glyph HStack, which made the
+> composer untypeable for assistive tech — the identifier, focus and key
+> handling now sit on the TextField itself.
+
 **Bottom line: the app works end to end.** Pairing, the Home hierarchy, all
 three grouping modes, all three filter tabs, chat send + echo, rename (from
 both sides), the offline flip and the reattach-after-restart were all driven

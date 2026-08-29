@@ -72,9 +72,15 @@ struct PresenceDot: View {
     }
 
     var body: some View {
-        Circle()
+        // Terminal redesign: a square LED, not a circle — the status
+        // indicator of hardware panels and tmux status lines. 2pt radius so
+        // it reads as an object rather than a pixel error. `working` blinks,
+        // exactly like the chat's streaming cursor: both mean "the machine
+        // is doing something right now".
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
             .fill(color)
             .frame(width: diameter, height: diameter)
+            .modifier(BlinkWhenWorking(active: level == .working))
             .accessibilityLabel(accessibilityLabel)
     }
 
@@ -96,5 +102,27 @@ struct PresenceDot: View {
         case .live: "online"
         case .offline: "offline"
         }
+    }
+}
+
+
+/// The `working` blink. One shared cadence with `BlinkingCursor` (0.9s) so
+/// the two "machine is busy" signals in the app pulse together, not against
+/// each other. Respects Reduce Motion by holding steady.
+private struct BlinkWhenWorking: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dimmed = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active && dimmed ? 0.25 : 1)
+            .task(id: active) {
+                guard active, !reduceMotion else { dimmed = false; return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    withAnimation(.easeInOut(duration: 0.2)) { dimmed.toggle() }
+                }
+            }
     }
 }

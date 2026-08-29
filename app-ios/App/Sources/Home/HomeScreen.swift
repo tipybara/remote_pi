@@ -3,9 +3,18 @@ import RemotePiSession
 import SwiftUI
 
 // ============================================================================
-// Home (spec 08 §7) — the plan-61 centerpiece, HIG edition.
+// Home (spec 08 §7) — the plan-61 centerpiece.
 //
-// Redesigned 2026-08-26 on three user requirements:
+// Two design passes, both alive in this file:
+//
+// 2026-08-29 — terminal skin. The phone is a terminal into your Mac, so Home
+// reads like a session list in one: plain edge-to-edge list on the app
+// background, rows are `❯ title` prompt lines, device headers are `# hostname`
+// comment lines, paths abbreviate `$HOME` to `~`. The skin changes NOTHING
+// structural: every pattern below from the HIG pass (swipe actions, context
+// menus, pull-to-refresh, toolbar menu, Dynamic Type) survives untouched.
+//
+// 2026-08-26 — HIG skeleton, on three user requirements:
 //
 //   1. ONE server. The app dials a single relay; nothing on this screen may
 //      suggest a server list. The relay is chrome-invisible while healthy —
@@ -54,6 +63,9 @@ struct HomeScreen: View {
     var body: some View {
         let content = model.content
         return phaseBody(content)
+            // Keep the capitalized title for the BACK button of pushed
+            // screens and for VoiceOver; the visible bar text is the mono
+            // lowercase principal item below.
             .navigationTitle("Sessions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -105,36 +117,59 @@ struct HomeScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .noPeer:
-            ContentUnavailableView {
-                Label("No Pairings Yet", systemImage: "qrcode.viewfinder")
-            } description: {
-                Text("Scan a QR code from your Mac to start.")
-            } actions: {
-                Button("Scan QR") { navigator.openPairing() }
-                    .buttonStyle(.borderedProminent)
+            // The design system's mono empty state, not
+            // `ContentUnavailableView` — the system component paints with the
+            // system font and reads as a different app inside the terminal
+            // chrome (see EmptyStateView.swift's header).
+            centered {
+                EmptyStateView(
+                    systemImage: "qrcode.viewfinder",
+                    title: "No Pairings Yet",
+                    message: "Scan a QR code from your Mac to start."
+                ) {
+                    PrimaryButton(title: "Scan QR") { navigator.openPairing() }
+                        .frame(maxWidth: 240)
+                }
             }
 
         case .lonely:
-            ContentUnavailableView {
-                Label("No Sessions", systemImage: "moon")
-            } description: {
-                Text("When a paired Pi opens a session, it shows up here.")
+            centered {
+                EmptyStateView(
+                    systemImage: "moon",
+                    title: "No Sessions",
+                    message: "When a paired Pi opens a session, it shows up here.",
+                    iconOpacity: 0.35
+                )
             }
 
         case .filterEmpty(let filter):
             // The pills row is gone, so the escape hatch that used to be "the
             // tabs stay visible" (spec 08 §7.3) is a button instead.
-            ContentUnavailableView {
-                Label(filterEmptyTitle(filter), systemImage: "line.3.horizontal.decrease.circle")
-            } description: {
-                Text(filterEmptyMessage(filter))
-            } actions: {
-                Button("Show All Sessions") { model.filter = .all }
+            centered {
+                EmptyStateView(
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    title: filterEmptyTitle(filter),
+                    message: filterEmptyMessage(filter)
+                ) {
+                    SecondaryButton(title: "Show All Sessions") { model.filter = .all }
+                        .frame(maxWidth: 240)
+                }
             }
 
         case .list:
             sessionList(content.sections)
         }
+    }
+
+    /// Empty states fill the phase body, vertically centered like the
+    /// system component they replaced.
+    private func centered(@ViewBuilder _ content: () -> some View) -> some View {
+        ScrollView {
+            content()
+                .frame(maxWidth: .infinity)
+                .containerRelativeFrame(.vertical) { length, _ in length }
+        }
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     private func filterEmptyTitle(_ filter: SessionFilter) -> String {
@@ -162,6 +197,7 @@ struct HomeScreen: View {
                     ForEach(device.workspaces) { workspace in
                         if model.grouping == .workspace {
                             WorkspaceHeaderRow(workspace: workspace)
+                                .listRowBackground(theme.colors.bg)
                         }
                         ForEach(workspace.rows) { row in
                             tile(row)
@@ -171,12 +207,20 @@ struct HomeScreen: View {
                     // With grouping off the rows carry their own context label
                     // (spec 08 §7.4) — an empty header would just add air.
                     if model.grouping != .none {
-                        Text(device.title)
+                        // A comment line, because that is what a hostname
+                        // above a block of sessions is.
+                        Text("# " + device.title)
+                            .font(theme.type.mono(11, weight: .semibold))
+                            .foregroundStyle(theme.colors.muted)
+                            .textCase(nil)
                     }
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        // Plain and edge-to-edge on the app ground: a terminal has one
+        // surface, not floating cards.
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .refreshable { await model.refresh() }
     }
 
@@ -189,7 +233,7 @@ struct HomeScreen: View {
             presence: model.presence(of: row.key),
             open: { Task { await open(row.key) } }
         )
-        .listRowBackground(isSelected ? theme.colors.accent.opacity(0.12) : nil)
+        .listRowBackground(isSelected ? theme.colors.accent.opacity(0.12) : theme.colors.bg)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             // Delete leads (rightmost) per HIG; it stays visible-but-refused
             // when unsupported so the affordance is discoverable.
@@ -234,6 +278,12 @@ struct HomeScreen: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Text("sessions")
+                .font(theme.type.mono(15, weight: .semibold))
+                .foregroundStyle(theme.colors.text)
+                .accessibilityHidden(true) // navigationTitle already says it
+        }
         ToolbarItemGroup(placement: .topBarTrailing) {
             // Hidden rather than disabled: the control frame rides the active
             // WebSocket, so an unreachable Mac genuinely cannot be asked
@@ -298,8 +348,8 @@ struct HomeScreen: View {
     @ViewBuilder
     private var offlineBanner: some View {
         if model.relayStatus == .offline {
-            Label("Relay unreachable — reconnecting…", systemImage: "wifi.exclamationmark")
-                .font(.footnote)
+            Label("relay unreachable — reconnecting…", systemImage: "wifi.exclamationmark")
+                .font(theme.type.mono(11.5))
                 .foregroundStyle(theme.colors.warning)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
@@ -320,16 +370,16 @@ struct HomeScreen: View {
     private var bannerOverlay: some View {
         if let banner = model.banner {
             Text(banner.text)
-                .font(.footnote)
+                .font(theme.type.mono(12))
                 .foregroundStyle(theme.colors.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.bar)
-                .clipShape(RoundedRectangle(cornerRadius: AppMetrics.radiusBubble, style: .continuous))
+                .background(theme.colors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppMetrics.radiusBubble, style: .continuous)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .strokeBorder(theme.colors.border, lineWidth: AppMetrics.hairline)
                 )
                 .padding(.horizontal, AppMetrics.gutter)
@@ -396,13 +446,16 @@ struct HomeScreen: View {
 private struct WorkspaceHeaderRow: View {
     let workspace: HomeWorkspaceSection
 
+    @Environment(\.theme) private var theme
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "folder")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(theme.type.mono(11))
+                .foregroundStyle(theme.colors.muted)
             Text(workspace.title)
-                .font(.subheadline.weight(.semibold))
+                .font(theme.type.mono(12, weight: .semibold))
+                .foregroundStyle(theme.colors.muted2)
                 .lineLimit(1)
             if let path = workspace.pathLine {
                 // The model already head-truncates; if the row is still too
@@ -410,15 +463,15 @@ private struct WorkspaceHeaderRow: View {
                 // that disambiguates. Tail-truncating here produced a path
                 // with an ellipsis at BOTH ends.
                 Text(path)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(theme.type.mono(11))
+                    .foregroundStyle(theme.colors.muted)
                     .lineLimit(1)
                     .truncationMode(.head)
             }
             Spacer(minLength: 4)
             Text("\(workspace.rows.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(theme.type.mono(11))
+                .foregroundStyle(theme.colors.muted)
                 .monospacedDigit()
         }
         .listRowSeparator(.hidden, edges: .top)

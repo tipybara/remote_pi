@@ -41,11 +41,16 @@ struct SettingsScreen: View {
 
     var body: some View {
         List {
-            serverSection
-            appearanceSection
-            devicesSection
+            // `.listRowBackground` on a Section propagates to every row in
+            // it — the terminal skin keeps grouped cards but paints them with
+            // the theme's `surface` on the theme's ground instead of the
+            // system grays (which clash with the light theme's paper tone).
+            serverSection.listRowBackground(theme.colors.surface)
+            appearanceSection.listRowBackground(theme.colors.surface)
+            devicesSection.listRowBackground(theme.colors.surface)
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

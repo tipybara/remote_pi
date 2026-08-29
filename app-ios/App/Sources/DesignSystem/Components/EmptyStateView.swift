@@ -96,7 +96,9 @@ struct PrimaryButton: View {
             .padding(.horizontal, 18)
             .background(isEnabled ? theme.colors.accent : theme.colors.border)
             .foregroundStyle(isEnabled ? theme.colors.onAccent : theme.colors.muted)
-            .clipShape(RoundedRectangle(cornerRadius: AppMetrics.radiusPill, style: .continuous))
+            // Terminal redesign: rectangles, not pills. 6pt keeps it from
+            // reading as a web widget while staying unmistakably a slab.
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled || isBusy)
@@ -119,7 +121,7 @@ struct SecondaryButton: View {
                 .padding(.vertical, 12)
                 .padding(.horizontal, 18)
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppMetrics.radiusPill, style: .continuous)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .strokeBorder(theme.colors.border, lineWidth: AppMetrics.hairline)
                 )
                 .foregroundStyle(isEnabled ? theme.colors.text : theme.colors.muted)

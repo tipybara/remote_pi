@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Font substitutions (documented, deliberate, dependency-free)
 //
@@ -95,24 +96,39 @@ struct AppTypography: Equatable, Sendable {
         self.scale = scale
     }
 
+    /// The OS Dynamic Type curve, applied to every explicit point size.
+    ///
+    /// This is the debt the Settings screen's "Text size: deliberately
+    /// absent" comment recorded: the app dropped its own size knob in favour
+    /// of the system one, but these factories still returned fixed sizes, so
+    /// the system knob did nothing. Routing every size through
+    /// `UIFontMetrics` (body curve — the design's sizes are body-relative)
+    /// makes Settings → Accessibility → Per-App Settings actually work, for
+    /// every one-off point size in the app at once.
+    private func scaled(_ size: CGFloat) -> CGFloat {
+        UIFontMetrics(forTextStyle: .body).scaledValue(for: size * scale)
+    }
+
     // MARK: Families
 
-    /// Monospace at an explicit size — chat text, terminal chrome, paths,
-    /// nearly all UI copy (the product's "coding agent" identity).
+    /// Monospace at an explicit size — since the 2026-08-29 terminal
+    /// redesign, effectively every glyph in the app. The phone is a terminal
+    /// into the user's Mac; the type says so.
     func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size * scale, weight: weight, design: .monospaced)
+        .system(size: scaled(size), weight: weight, design: .monospaced)
     }
 
-    /// Proportional body text. Rare: only where mono would be genuinely worse
-    /// (long prose paragraphs in onboarding / empty states).
+    /// Proportional body text. Rare: only where mono is genuinely worse
+    /// (long prose paragraphs in onboarding / empty states / alerts).
     func sans(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size * scale, weight: weight, design: .default)
+        .system(size: scaled(size), weight: weight, design: .default)
     }
 
-    /// The brand wordmark — "Remote Pi", and nothing else. Never substitute
-    /// ``mono(_:weight:)`` for it and never use it for ordinary titles.
+    /// The brand wordmark. Terminal redesign: the brand face IS the mono face
+    /// — a wordmark set in a grotesque on top of an all-mono UI read as a
+    /// sticker from a different app.
     func brand(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size * scale, weight: weight, design: .default)
+        .system(size: scaled(size), weight: weight, design: .monospaced)
     }
 
     // MARK: Named presets (the Dart `AppTypography` triple)
