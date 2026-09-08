@@ -31,7 +31,14 @@ import XCTest
 /// reads it from the simulator pasteboard instead (`xcrun simctl pbcopy`).
 enum Env {
     /// The relay the app is pointed at. Must match fake-pi's `--relay`.
-    static var relay: String { value("RP_RELAY") ?? "ws://localhost:3888" }
+    ///
+    /// Defaults to the PRODUCTION relay (2026-08-30, user decision): the e2e
+    /// suite runs against relay.tengfei.site's real data, not a loopback
+    /// stand-in. The env override still exists but — see the trap below —
+    /// `TEST_RUNNER_*` has never actually reached this runner, so on this
+    /// machine the default IS the configuration. Point fake-pi at the same
+    /// host before running.
+    static var relay: String { value("RP_RELAY") ?? "wss://relay.tengfei.site" }
 
     /// Substring of the session the chat tests should open.
     static var chatSession: String { value("RP_CHAT_SESSION") ?? "" }

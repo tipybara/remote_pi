@@ -4,7 +4,8 @@
 #   ./scripts/e2e.sh <test-name> [extra TEST_RUNNER_ env assignments...]
 #
 # Screenshots land in build/native-<attachment-name>.png. See STATUS.md for the
-# preconditions (relay on RP_RELAY, fake-pi against the same relay).
+# preconditions (fake-pi pointed at the same relay — the default is the
+# PRODUCTION relay, wss://relay.tengfei.site).
 #
 # `xcodebuild test`, not `test-without-building`: TEST_RUNNER_* environment is
 # baked into the generated .xctestrun at build-for-testing time, so passing it
@@ -16,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 SIM="${RP_SIM:-DFB18620-63F4-4AF2-95BB-392893A258C4}"
-RELAY="${RP_RELAY:-ws://localhost:3888}"
+RELAY="${RP_RELAY:-wss://relay.tengfei.site}"
 TEST="${1:?usage: e2e.sh <TestName> [KEY=VALUE ...]}"
 shift || true
 
